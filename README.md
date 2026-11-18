@@ -17,7 +17,8 @@ days what a change does to the compressed size, and whether the result still dec
   single-core, and nothing here changes it.
 * Every addition is behind compile-time macros (`NEIF_TEST`, `NEIF_PACKED`, `NEIF_MT`) that the
   official build does not define. **The official build of this tree is byte-identical to
-  upstream's published compressor**: `comp9`, 4,042,564 B, sha256
+  upstream's published compressor** (rebuilt with `fast/neif_build_official.sh` from this source
+  on 18 Nov 2026): `comp9`, 4,042,564 B, sha256
   `976bf2d309707ab555e0c92720da5508ff0e5e6b846fc7082234262b06767f82`, the value in upstream's
   `environment.txt`. To check: `bash fast/neif_build_official.sh` (runs upstream's `build.sh` and
   compares; about 7 minutes; needs upstream's toolchain, section 5).
@@ -64,7 +65,9 @@ It is a **baseline for comparing variants, not an archive size**:
 * so only the **difference** of two totals at the same K and WARM is meaningful. For a variant
   the script prints the *estimate* S = 93,388,956 + (total - 88,132,116.4), where 93,388,956 B is
   the published size S of cmix-neif 2.0. A small difference between variants should be confirmed
-  by a full run before it is believed.
+  by a full run before it is believed. The estimate also assumes the size of `comp9` is
+  unchanged, so for a variant that changes the weights or the code, add the change in the
+  size of `comp9` and of the parts of `archive9` that are not coder output.
 
 ## 3. The modifications
 
@@ -180,7 +183,7 @@ laptop (*estimate*, `fast/docs/DESIGN.md` 0b). More threads do not help on the l
   **changes the coded bits** (it is a model variant; compressor and decoder need the same
   setting). On three 1 MB windows the kept bits fell by 0.058 %, 0.082 % and 0.078 % (0.074 %
   over the three) (`fast/results/laptop/act16_results.txt`: lines `g10_2_*_162` against
-  `a16_*_0`), at a time cost of 3 % to 8 % on the laptop (`f_k16on*` against `f_k16off*` in
+  `a16_*_0`), at a time cost of 2 % to 8 % on the laptop (`f_k16on*` against `f_k16off*` in
   `fast_results.txt`). There is **no full-stream number**, and it cannot be combined with the
   speculative step.
 
@@ -203,8 +206,9 @@ PASS**; its wall time was set by the busier host: 12,245 s compress + 13,393 s v
 decode, against 7,885 s + 7,825 s on the quieter one.
 
 * Peak memory of the one-instance run: 164.8 GiB for the container (cgroup figure, page cache
-  included; `k16_one_machine/monitor.tsv`); 9.7 to 10.6 GiB per split.
-* **The result does not depend on the machine or the layout**: every split has the same kept
+  included; `k16_one_machine/monitor.tsv`); 9.6 to 10.6 GiB per split.
+* **The result did not depend on the host or the layout** (both hosts are EPYC 9654 running the
+  same binary; other CPU models were not compared): every split has the same kept
   bits in all runs, and the coded output of each of the 16 splits has the same sha256 in the
   one-instance run and in the runs on both hosts of the two-instance layout (`k16_per_split.tsv`).
 * **Shared-host contention changes the wall time by up to about 1.75x.** The same eight splits
@@ -214,9 +218,11 @@ decode, against 7,885 s + 7,825 s on the quieter one.
   12,244 s to compress and between 7,942 s and 13,393 s to verify. The first run of the scaling test on that host was 4.8x slower than its two repeats
   (678.5 s against 139.4 / 140.7 s). Timings on such instances are not reproducible to better
   than that; the bits are.
-* So the two-day experiment "compress, then decompress and compare" (2 x 49 h on one core)
-  becomes 7.9 h on one instance (3.66 h + 4.23 h), or about 4.4 h on two instances when both
-  hosts are quiet (2.19 h + 2.17 h on the quieter one).
+* So the four-day experiment "compress, then decompress and compare" (2 x 49 h on one core)
+  becomes 7.9 h on one instance (3.66 h + 4.23 h). On two instances with both hosts quiet it
+  would be about 4.4 h (*estimate*: 2.19 h + 2.17 h are the measured passes of splits 8-15 on
+  the quiet host; splits 0-7 compressed there in 1.94 h, and their verification decode was not
+  run on a quiet host).
 * Cost (*estimate*, not in the result files): at the 1.3 to 1.8 US dollars per instance-hour we
   paid, about 10 to 14 dollars for the one-instance run (7.9 h), 11 to 16 dollars for two instances
   on quiet hosts (2 x 4.4 h), and 18 to 26 dollars for the two-instance run as it went (2 x 7.1 h).
