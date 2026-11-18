@@ -1,5 +1,11 @@
 #include "meld.h"
 #include "predictor.h"
+#ifdef NEIF_TEST
+#include "neif_test.h"   // chunk evaluation: profile marks, pipeline
+#ifdef NEIF_MT
+#include "neif_mt.h"     // threads for the transformer step, the speculative step
+#endif
+#endif
 #include "attributes.h"
 #include "cold_size.h"
 #include "invariants.h"
@@ -140,6 +146,9 @@ COLD_SIZE_ATTR  void Predictor::AddMatch() {
 
   // The longest of these matches feeds the transformer's match channel.
   tf1_match_base_ = match_models_.size();
+#ifdef NEIF_TEST
+  neif_test::g_reg_match[0] = pageregistry::T().n;   // pipeline: the tables of these models
+#endif
   for (const auto& params : model_params) {
     const Context& context = manager_.AddContextHashContext(manager_.bit_context_,params[0], params[1]);
     match_models_.emplace_back(manager_.history_, context.GetContext(),
@@ -147,6 +156,9 @@ COLD_SIZE_ATTR  void Predictor::AddMatch() {
         &(manager_.longest_match_));
   }
   tf1_match_count_ = match_models_.size() - tf1_match_base_;
+#ifdef NEIF_TEST
+  neif_test::g_reg_match[1] = pageregistry::T().n;
+#endif
 }
 
  void Predictor::AddGrammarMatch() {
@@ -172,8 +184,14 @@ unsigned int Discretize(float p) {
   // slot (Tf1Slot) and takes the place the byte LSTM had in the mixer
   // rows.
   if (transformer::Running()) {
+#ifdef NEIF_TEST
+    neif_test::g_reg_tf[0] = pageregistry::T().n;   // pipeline: the areas of the transformer
+#endif
     tf1_engine_.reset(
         new transformer::Tf1Engine(vocab_, transformer::WeightsPath()));
+#ifdef NEIF_TEST
+    neif_test::g_reg_tf[1] = pageregistry::T().n;
+#endif
     bitl_hid_ = tf1_engine_->LastHidden();
     bitl_n_hid_ = bitl_hid_ ? tf1_engine_->HiddenSize() : 0;
     bitl_n_tf_ = 4;
@@ -452,11 +470,20 @@ __attribute__((noinline)) void Predictor::EndLearn(int bit) {
   mixer_1_[mix_select::kIa].E2ESetErr(e);
 }
  float Predictor::Predict() {
+#ifdef NEIF_TEST
+  neif_test::T(1);   // profile mark: fxcm first half, selectors, cache readout
+#endif
   fxcm_model_.PredictHalf();
+#if defined(NEIF_TEST) && defined(NEIF_PAR)
+  neif_test::T(17);   // NEIF_PAR: section 1 is fxcm alone; the selectors and the cache readout below read the transformer row
+#endif
   Lx1TfConf();   // lx1_agree selector: transformer favourite class
   manager_.UpdateTf1Gate();   // gate zone as mixer context
   KtxSelect();   // contexts of the add rows
   SemPredBit();
+#ifdef NEIF_TEST
+  neif_test::T(2);   // profile mark: the layer-0 row from the model outputs
+#endif
   unsigned int input_index = 0;
   auto bracket_model_output = bracket_model_->Predict()[0];
   layers_[0].SetInput(input_index++, bracket_model_output);
@@ -585,6 +612,9 @@ __attribute__((noinline)) void Predictor::EndLearn(int bit) {
   // their own, so its PGO profile entry stays valid.
   FwSetInput(input_index++);
   SemSetInput(input_index++);
+#ifdef NEIF_TEST
+  neif_test::T(3);   // profile mark: mixers, SSE, end of Predict()
+#endif
   const bool chr_skip_mix = (byte_mixer_override >= 0);
   float p;
   if (chr_skip_mix) {
@@ -647,6 +677,9 @@ __attribute__((noinline)) void Predictor::EndLearn(int bit) {
   if (byte_mixer_override >= 0) p = byte_mixer_override;
   bitl_override_ = (byte_mixer_override >= 0) ? 1 : 0;
   last_p16_ = (unsigned int)(1 + 65534 * p);
+#ifdef NEIF_TEST
+  neif_test::T(0);   // profile mark: coder, runner
+#endif
   return p;
 }
 
@@ -1666,6 +1699,9 @@ void Predictor::E2EGrad(int bit) {
 }
 
  void Predictor::Perceive(int bit) {
+#ifdef NEIF_TEST
+  neif_test::T(4);   // profile mark: the cmix models learn the bit
+#endif
   word_label::Perceive(wordlbl_, bit);
   pagectx::surprise.AddBit(last_p16_, bit, manager_.bit_context_ >= 128);
   bracket_model_->Perceive(bit);
@@ -1688,6 +1724,9 @@ void Predictor::E2EGrad(int bit) {
   tf1_slot_->Perceive(bit);
   FwPerceive(bit);
 
+#ifdef NEIF_TEST
+  neif_test::T(5);   // profile mark: mixer and SSE update
+#endif
   if (char_rate::Forced(manager_.bit_context_)) {
     sse_.PerceiveContextOnly(bit);
     for (auto& mixer: mixer_0_) mixer.PerceiveSkip();
@@ -1708,6 +1747,9 @@ void Predictor::E2EGrad(int bit) {
 
   sse_.Perceive(bit);
   }
+#ifdef NEIF_TEST
+  neif_test::T(6);   // profile mark: adaptive depth, contexts, byte updates of the cmix models
+#endif
   if (!char_rate::Forced(manager_.bit_context_)) {
     adaptive_depth::TrainStep(adepth_, bit);
     ++adepth_.coded;
@@ -1741,7 +1783,20 @@ void Predictor::E2EGrad(int bit) {
       indirect_r_models_[i].ByteUpdate();
     }
     grammar_match_->ByteUpdate();
+#ifdef NEIF_TEST
+    neif_test::T(7);   // profile mark: PPMd
+#endif
+#if defined(NEIF_TEST) && defined(NEIF_MT)
+    NeifPpmdByteUpdate();   // NEIF_MT: byte_model_->ByteUpdate(), or the result of the speculation in its place
+#else
     byte_model_->ByteUpdate();
+#endif
+#ifdef NEIF_TEST
+    byte_model_->NeifRow();   // pipeline: the PPMd result of this byte, sent or checked
+#endif
+#ifdef NEIF_TEST
+    neif_test::T(8);   // profile mark: transformer driver and network
+#endif
     if (tf1_prior_writer_) {
       const std::valarray<float>& tf1_pp = byte_model_->BytePredict();
       for (int i = 0; i < transformer::kSetSize; ++i) {
@@ -1762,6 +1817,9 @@ void Predictor::E2EGrad(int bit) {
     const float* tf1_row = tf1_engine_
         ? tf1_engine_->Step(byte_model_->BytePredict(), manager_.bit_context_)
         : nullptr;
+#ifdef NEIF_TEST
+    neif_test::T(9);   // profile mark: slots, path state
+#endif
     if (tf1_row && transformer::Active()) {
       if (tf1_engine_->GateMasked()
           || alias_prompt::Laeuft()   // alias rows are being fed
@@ -1783,8 +1841,14 @@ void Predictor::E2EGrad(int bit) {
   tf1_slot_output = tf1_slot_->Predict()[0];
   FwPredictBit();
   MlPath(byte_update);   // path state of the next bit (selector of the add rows)
+#ifdef NEIF_TEST
+  neif_test::T(10);   // profile mark: fxcm
+#endif
   fxcm_model_.Perceive(bit);
   if (byte_update)manager_.bit_context_ = 1;
+#ifdef NEIF_TEST
+  neif_test::T(0);   // profile mark: coder, runner
+#endif
 }
 
  void Predictor::ObserveKnownBit(int bit) {
@@ -1793,8 +1857,214 @@ void Predictor::E2EGrad(int bit) {
 }
 
 void Predictor::ObserveTfOnlyByte(unsigned int byte) {
+#if defined(NEIF_TEST) && defined(NEIF_PAR)
+  neif_test::T(8);   // NEIF_PAR: the step of an alias row is transformer time (it has no Perceive() around it)
+#endif
+  if (tf1_engine_) tf1_engine_->Step(byte_model_->BytePredict(), byte);
+#if defined(NEIF_TEST) && defined(NEIF_PAR)
+  neif_test::T(0);
+#endif
+}
+
+#ifdef NEIF_TEST
+#ifdef NEIF_MT
+// ---- NEIF_MT: speculation on the next transformer step (src/neif_mt.h) ------
+// order and hash width of the contexts of the transformer's match models (AddMatch)
+static const unsigned int kNeifMatchCtx[5][2] = {{0, 8}, {1, 8}, {7, 4}, {11, 3}, {13, 2}};
+__attribute__((noinline)) void Predictor::NeifSpecLaunch(int g) {
+  if (!neif_mt::g_spec || !tf1_engine_ || !transformer::Active()) return;
+  if (g < 0 || !byte_model_->SpecSafe() || !tf1_engine_->SpecPossible((unsigned int)g) || tf1_match_count_ > 5) {
+    ++neif_spec_.not_possible;
+    return;
+  }
+  // the match channel behind the byte g (the selection of Perceive(): the first longest match)
+  int mb = -1, ml = 0;
+  if (tf1_match_count_ > 0) {
+    unsigned char bb = 0, bl = 0;
+    match_models_[tf1_match_base_].Peek(g, kNeifMatchCtx[0][0], kNeifMatchCtx[0][1], manager_.history_pos_, &bb, &bl);
+    for (unsigned int q = 1; q < tf1_match_count_; ++q) {
+      unsigned char b = 0, l = 0;
+      match_models_[tf1_match_base_ + q].Peek(g, kNeifMatchCtx[q][0], kNeifMatchCtx[q][1], manager_.history_pos_, &b, &l);
+      if (l > bl) { bl = l; bb = b; }
+    }
+    mb = bb;
+    ml = bl;
+  }
+  if (!neif_ppmd_shadow_) neif_ppmd_shadow_ = new PPMD::PPMD(*byte_model_, neif_spec_byte_, PPMD::PPMD::Shadow());
+  neif_spec_byte_ = (unsigned int)g;
+  neif_spec_.g = g;
+  neif_spec_.mbyte = mb;
+  neif_spec_.mlen = ml;
+  neif_spec_.ppmd_done.store(0, std::memory_order_relaxed);
+  neif_spec_.live = true;
+  ++neif_spec_.launched;
+  tf1_engine_->SpecMark();   // waits for an earlier speculation nobody took
+  neif_mt::SpecPost(&Predictor::NeifSpecJob, this);
+}
+// transformer thread: PPMd behind the guessed byte, then the network row
+void Predictor::NeifSpecJob(void* self) {
+  Predictor* p = static_cast<Predictor*>(self);
+  p->byte_model_->SpecBegin();
+  p->neif_ppmd_shadow_->ByteUpdate();
+  p->byte_model_->SpecEnd();
+  p->neif_spec_.ppmd_done.store(1, std::memory_order_release);
+  p->tf1_engine_->SpecRun(&p->neif_ppmd_shadow_->BytePredict()[0], (unsigned int)p->neif_spec_.g,
+                          p->neif_spec_.mbyte, p->neif_spec_.mlen);
+}
+__attribute__((noinline)) void Predictor::NeifPpmdByteUpdate() {
+  if (neif_spec_.live) {
+    neif_spec_.live = false;
+    while (!neif_spec_.ppmd_done.load(std::memory_order_acquire)) _mm_pause();
+    if ((int)(manager_.bit_context_ & 0xFFu) == neif_spec_.g) {   // the byte is the guessed one
+      byte_model_->SpecKeep();
+      byte_model_->SpecAdopt(*neif_ppmd_shadow_);
+      ++neif_spec_.ppmd_kept;
+      return;
+    }
+    tf1_engine_->SpecAbort();
+    byte_model_->SpecUndo();
+    ++neif_spec_.ppmd_undone;
+  }
+  byte_model_->ByteUpdate();
+}
+void Predictor::NeifSpecReport(FILE* f) {
+  if (!neif_mt::g_spec || !tf1_engine_) return;
+  unsigned long long v[3] = {0, 0, 0};
+  tf1_engine_->SpecStats(v);
+  fprintf(f, "neif_mt spec: launched %llu, not possible %llu, PPMd kept %llu, undone %llu; network rows run %llu, taken %llu, "
+             "not taken %llu\n",
+          neif_spec_.launched, neif_spec_.not_possible, neif_spec_.ppmd_kept, neif_spec_.ppmd_undone, v[0], v[1], v[2]);
+}
+#endif
+#ifdef NEIF_PAR
+// NEIF_PAR (src/neif_test.h): what a decoder could guess the stream byte c
+// from when its bit loop begins.  Called behind SemByteStart(), so the slots
+// hold the rows of this byte (set at the end of Perceive() of the byte in
+// front), the match models stand behind their ByteUpdate() and the cache has
+// its neighbours.  Reads only; the guesses and their bookkeeping are in
+// neif_test::par::ByteStart.
+__attribute__((noinline)) void Predictor::NeifParByteStart(int c) {
+  if (!neif_test::par::g_par) return;
+  neif_test::par::Src s;
+  s.tf = &tf1_slot_->BytePredict()[0];
+  s.fw = &fw_slot_->BytePredict()[0];
+  s.pp = &byte_model_->BytePredict()[0];
+  s.live = tf1_slot_->KtxLive() ? 1 : 0;
+  s.zone = tf_gate::ctx.zone;
+  // the longest match of the transformer's match models, as TreffByteStart()
+  s.mbyte = -1;
+  s.mlen = 0;
+  if (tf1_match_count_ > 0) {
+    unsigned int best = tf1_match_base_;
+    unsigned char best_len = match_models_[tf1_match_base_].MatchLength();
+    for (unsigned int q = 1; q < tf1_match_count_; ++q) {
+      const unsigned char l = match_models_[tf1_match_base_ + q].MatchLength();
+      if (l > best_len) { best_len = l; best = tf1_match_base_ + q; }
+    }
+    s.mbyte = (int)match_models_[best].MatchByte() & 255;
+    s.mlen = best_len;
+  }
+  s.cache = sem_.nn > 0 ? (sem_.topb & 255) : -1;
+  s.forced = tf1_engine_ ? tf1_engine_->ZwangByte() : -1;
+  neif_test::par::ByteStart(s, c & 255);
+}
+#endif
+namespace bit_head { void NeifSyncSlot(); }
+// Chunk evaluation, structure-only pass.  Of all that Perceive() does at a
+// byte boundary only the transformer driver is called: its Step() runs the
+// automata that read the stream (redirect and alias tables, rule view, link
+// context, prompt, gate; the page count), and with neif_test::g_skip set it
+// leaves out the network step (Tf1Engine::Impl::Feed).  No cmix model, mixer
+// or cache sees the byte.
+void Predictor::NeifSkipByte(unsigned int byte) {
   if (tf1_engine_) tf1_engine_->Step(byte_model_->BytePredict(), byte);
 }
+// The PPMd model restarts once at the end of the metadata block and once at
+// the end of the census line (latches of ppmd_meta.h, read in its
+// ByteUpdate()).  The skipped bytes never reach ByteUpdate(), so the restarts
+// are taken here, right behind the byte that set the latch: the warm-up of the
+// dictionary article (PpmdWaermen) then falls behind them as in a real run.
+void Predictor::NeifSkipSync() { byte_model_->NeifSync(); }
+// BITLSTM chooses its weight set from the bits it corrected (a bit of the
+// metadata block seen, then one outside it; then the page count).  A run that
+// starts behind the metadata block never sees the first condition: set the
+// weight set of the position.
+void Predictor::NeifSkipEnd() { bit_head::NeifSyncSlot(); }
+
+// ---- pipeline (src/neif_test.h) ---------------------------------------------
+// Before the fork: the tables of the semantic cache.  SemInit() runs at the
+// first stream byte of the model and makes room for them in the PPMd page
+// pool; after the fork the pool belongs to the PPMd stage, so it runs here,
+// at the same place of the stream.
+void Predictor::NeifPipePrepare() {
+  if (!sem_.key) SemInit();
+}
+// A front stage: one model byte (coded, forced or injected).  Of what
+// Perceive() does for the eight bits and at the byte boundary, the part that
+// PPMd and the transformer read: the contexts and the history (context
+// manager), the match models whose longest match is the transformer's match
+// channel, PPMd, the transformer driver and the fast-weight target marks.
+// None of it reads the mixers, the coder or any other model.
+void Predictor::NeifFrontByte(unsigned int byte) {
+  const bool lo = (neif_test::g_own & neif_test::kOwnTfLo) != 0;   // this stage embeds the rows
+  for (int j = 7; j >= 0; --j) {
+    const int bit = (int)((byte >> j) & 1u);
+    if (lo)
+      for (unsigned int q = 0; q < tf1_match_count_; ++q) match_models_[tf1_match_base_ + q].Perceive(bit);
+    manager_.UpdateContexts(bit);
+  }
+  if (lo)
+    for (unsigned int q = 0; q < tf1_match_count_; ++q) match_models_[tf1_match_base_ + q].ByteUpdate();
+  byte_model_->ByteUpdate();
+  byte_model_->NeifRow();
+  if (lo && tf1_engine_ && tf1_match_count_ > 0) {   // as in Perceive()
+    unsigned int best = tf1_match_base_;
+    unsigned char best_len = match_models_[tf1_match_base_].MatchLength();
+    for (unsigned int q = 1; q < tf1_match_count_; ++q) {
+      const unsigned char l = match_models_[tf1_match_base_ + q].MatchLength();
+      if (l > best_len) { best_len = l; best = tf1_match_base_ + q; }
+    }
+    tf1_engine_->SetMatch(match_models_[best].MatchByte(), (int)best_len);
+  }
+  const float* tf1_row = tf1_engine_
+      ? tf1_engine_->Step(byte_model_->BytePredict(), manager_.bit_context_)
+      : nullptr;
+  if (tf1_engine_) {
+    // the target marks of the fast weights, as FwSetNeutral/FwSetRow/FwSetOff set them
+    if (tf1_row && transformer::Active() && !tf1_engine_->GateMasked()
+        && !alias_prompt::Laeuft() && !timestamp_skip::Laeuft()) tf1_engine_->FwRow();
+    else tf1_engine_->FwNeutral();
+  }
+  manager_.bit_context_ = 1;
+}
+// A front stage, right after the fork: the large tables it never reads go back
+// to the kernel (the pages stay with the coder stage, which then owns them
+// alone and writes them without a copy).  Kept: the history, the tables of
+// the transformer's match models, the areas of the transformer; PPMd has its
+// own heap.  MADV_DONTNEED leaves the mapping: a dropped page reads as zero.
+static void NeifDrop(const void* p, size_t n) {
+  const unsigned long a = ((unsigned long)p + 4095UL) & ~4095UL, b = ((unsigned long)p + n) & ~4095UL;
+  if (b > a) madvise((void*)a, b - a, MADV_DONTNEED);
+}
+void Predictor::NeifFrontDrop() {
+  const pageregistry::Table& t = pageregistry::T();
+  const unsigned long hist = (unsigned long)manager_.history_.data();
+  for (unsigned int i = 0; i < t.n; ++i) {
+    if (i >= neif_test::g_reg_match[0] && i < neif_test::g_reg_match[1]) continue;
+    if (i >= neif_test::g_reg_tf[0] && i < neif_test::g_reg_tf[1]) continue;
+    if (hist >= t.a[i] && hist < t.b[i]) continue;
+    NeifDrop((const void*)t.a[i], t.b[i] - t.a[i]);
+  }
+  if (sem_.key) {
+    using namespace semantic_cache;
+    NeifDrop(sem_.key, (size_t)kN * kKB);
+    NeifDrop(sem_.val, (size_t)kN);
+    NeifDrop(sem_.slot, ((size_t)kL << kB) * kM * sizeof(Slot));
+    NeifDrop(sem_.epos, (size_t)kN * 4);
+    NeifDrop(sem_.hist, (size_t)kHist);
+  }
+}
+#endif
 
 void Predictor::Pretrain(int bit) {
   bracket_model_->Predict();

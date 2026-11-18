@@ -109,6 +109,16 @@ void kda_layer_step(const KdaWeights& w, KdaState& st, const float* q_in,
                     const float* og, const float* beta_raw, float* out,
                     KdaDebug* dbg = nullptr, KdaProfile* prof = nullptr);
 
+#if defined(NEIF_TEST) && defined(NEIF_MT)
+// NEIF_MT (src/neif_mt.h): the step with the head states read from S_in and
+// written to S_out (3 x 64 x 64 floats, 64-byte aligned; may be the same
+// buffer, which is kda_layer_step).  The conv ring and the position are those
+// of `st`; the position moves on only with `advance`.  See kda.cpp.
+void kda_layer_step_io(const KdaWeights& w, KdaState& st, const float* S_in, float* S_out, bool advance,
+                       const float* q_in, const float* k_in, const float* v_in, const float* g_raw,
+                       const float* og, const float* beta_raw, float* out);
+#endif
+
 // Exposed for tests/benchmarks: one head's state sweep on precomputed
 // inputs. decay/kn[64], v[64], qs[64] = 0.125*qn, beta already sigmoided,
 // o[64] output. pf_next: state of the next head to software-prefetch

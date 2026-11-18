@@ -164,8 +164,31 @@ unsigned char* xl_ruf0w(unsigned char* a, unsigned long long len);
 unsigned char* xl_ruf1w(unsigned char* a, unsigned long long len);
 // HEISS = 1 inlines the fast path (used in the hot functions only).
 // FREMD = 1: the address may lie outside the heap.  SCHREIB = 1: write access.
+#if defined(NEIF_TEST) && defined(NEIF_MT)
+// NEIF_MT (src/neif_mt.h): undo journal of a speculative model update.  While
+// jn_on is set every write translation of a heap object first notes the
+// object's canonical address and its bytes as they are; jn_undo() writes them
+// back in reverse order, jn_keep() forgets them.  Every heap write of the
+// model goes through xl_t with SCHREIB (hzg::w, xl_w, kopiere through xl_w),
+// so this one hook sees them all.  Objects outside the heap (the free lists
+// in the model object, a block header on the stack) are not noted: the model
+// object is saved and restored as a whole by the caller.
+extern int jn_on;
+void jn_note(unsigned char* a, const unsigned char* p, unsigned long long len);
+void jn_begin(void);
+void jn_stop(void);
+void jn_keep(void);
+void jn_undo(void);
+#endif
 template <int FREMD, int HEISS, int SCHREIB>
 static inline unsigned char* xl_t(unsigned char* a, unsigned long long len) {
+#if defined(NEIF_TEST) && defined(NEIF_MT)
+  if (SCHREIB && __builtin_expect(jn_on, 0)) {
+    unsigned char* p = HEISS ? xl_kern<FREMD, SCHREIB>(a, len) : (FREMD ? xl_ruf1w(a, len) : xl_ruf0w(a, len));
+    jn_note(a, p, len);
+    return p;
+  }
+#endif
   if (HEISS) return xl_kern<FREMD, SCHREIB>(a, len);
   if (SCHREIB) return FREMD ? xl_ruf1w(a, len) : xl_ruf0w(a, len);
   return FREMD ? xl_ruf1(a, len) : xl_ruf0(a, len);

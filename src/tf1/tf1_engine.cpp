@@ -4,6 +4,9 @@
 
 #include "../meld.h"
 #include "tf1_engine.h"
+#ifdef NEIF_TEST
+#include "../neif_test.h"   // chunk evaluation: structure-only pass
+#endif
 #include "../census_title.h"
 
 #include "../alias_title_subst.h"
@@ -317,6 +320,29 @@ struct Tf1Engine::Impl {
   __attribute__((noinline)) void Feed(int tok, const uint16_t* prior, bool inserted, float* out
             , bool gelesen
            ) {
+#ifdef NEIF_TEST
+    // chunk evaluation: every row the coder feeds is a structure event (token,
+    // inserted or stream row, read row); in the structure-only pass the row
+    // is booked as below and the network step is left out
+    neif_test::H((unsigned)tok);
+    neif_test::H((inserted ? 1u : 0u) | (gelesen ? 2u : 0u));
+    if (neif_test::g_hash_on) ++neif_test::g_tf_rows;
+    ++neif_test::g_tf_rows_all;
+    if (!neif_test::g_skip) { ++neif_test::g_tf_rows_model; if (gelesen) ++neif_test::g_tf_rows_read; }
+    // the same in a pipeline stage behind the network (src/neif_test.h): what
+    // the steps of this byte leave of it came from the queue, in Step()
+    if (neif_test::g_skip || !neif_test::OwnTf()) {
+      pk_prev2 = pk_prev1;
+      pk_prev1 = tok;
+      ++doc_rows;
+      if (doc_rows > max_doc_rows) max_doc_rows = doc_rows;
+      if (gelesen && !neif_test::g_skip) fw_have = true;
+      return;
+    }
+#ifdef NEIF_PAR
+    neif_test::par::Row(inserted, gelesen);   // NEIF_PAR: a row for the network (the rows of a driver step, the unread ones)
+#endif
+#endif
     if (opt) opt->set_gelesen(gelesen);
     fx2::PaketChannels ch;
     ch.prev1 = pk_prev1;
@@ -419,10 +445,36 @@ LOAD_PATH_ATTR Tf1Engine::~Tf1Engine() {
   delete impl_;
 }
 
+#ifdef NEIF_TEST
+// Pipeline (src/neif_test.h), record 'F': everything the coder side reads of
+// the network after one driver step -- the raw output row (Step() makes the
+// slot row from it) and the engine's hidden vector, cache key and second-head
+// row.  The stage with the output heads sends it at the end of Step(); the
+// coder stage, which runs no network step (Feed()), takes it at the start.
+// That is the same: whatever Step() derives from the row and keeps (half,
+// probs) is derived, or derived again, behind the last network step of that
+// Step(), and between two Step() calls nothing changes the engine.
+static void NeifStateIo(float* tf_out, fx2::opt::TransformerOpt* opt, bool load) {
+  float buf[208 + fx2::opt::TransformerOpt::kNeifState];
+  if (load) {
+    neif_test::Get('F', buf, sizeof buf);
+    memcpy(tf_out, buf, sizeof(float) * 208);
+    opt->neif_state(buf + 208, true);
+  } else {
+    memcpy(buf, tf_out, sizeof(float) * 208);
+    opt->neif_state(buf + 208, false);
+    neif_test::Put('F', buf, sizeof buf);
+  }
+}
+#endif
+
 const float* Tf1Engine::Step(const std::valarray<float>& ppmd,
     unsigned int byte) {
   Impl& s = *impl_;
   if (timestamp_skip::Laeuft()) return s.probs.data();
+#ifdef NEIF_TEST
+  if (neif_test::g_own == neif_test::kOwnMix) NeifStateIo(s.tf_out.data(), s.opt, true);
+#endif
   if (alias_prompt::Laeuft()) {
     if (comment_tag::g_j < 2) byte = comment_tag::g_tf[comment_tag::g_j++];
     const int atok = s.byte_to_index[byte];
@@ -462,6 +514,9 @@ const float* Tf1Engine::Step(const std::valarray<float>& ppmd,
     RowToFloats(s.half.data(), s.probs.data());
     s.probs_from_tf = true;
     RowFloor(s.probs.data(), ((float)(300) * 1e-10f));
+#ifdef NEIF_TEST
+    if ((neif_test::g_own & neif_test::kOwnTfHi) && neif_test::g_out) NeifStateIo(s.tf_out.data(), s.opt, false);
+#endif
     return s.probs.data();
   }
 
@@ -716,6 +771,9 @@ const float* Tf1Engine::Step(const std::valarray<float>& ppmd,
     }
   }
   RowFloor(s.probs.data(), ((float)(300) * 1e-10f));
+#ifdef NEIF_TEST
+  if ((neif_test::g_own & neif_test::kOwnTfHi) && neif_test::g_out) NeifStateIo(s.tf_out.data(), s.opt, false);
+#endif
   return s.probs.data();
 }
 
@@ -763,6 +821,37 @@ int Tf1Engine::HiddenSize() const {
 const float* Tf1Engine::LastKey() const {
   return impl_->opt ? impl_->opt->last_key() : nullptr;
 }
+
+#if defined(NEIF_TEST) && defined(NEIF_MT)
+// NEIF_MT: see tf1_engine.h
+bool Tf1Engine::SpecPossible(unsigned int byte) const {
+  const Impl& s = *impl_;
+  if (!s.opt || timestamp_skip::Laeuft() || alias_prompt::Laeuft()) return false;
+  if (byte > 255 || s.byte_to_index[byte] < 0) return false;
+  if (s.gate && !s.gate->Feeds()) return false;
+  return s.opt->spec_ready();
+}
+void Tf1Engine::SpecMark() { impl_->opt->spec_mark(); }
+void Tf1Engine::SpecAbort() { impl_->opt->spec_abort(); }
+void Tf1Engine::SpecStats(unsigned long long* v) const { impl_->opt->spec_stats(v); }
+void Tf1Engine::SpecRun(const float* ppmd, unsigned int byte, int match_byte, int match_len) {
+  const Impl& s = *impl_;
+  // the prior as Step() makes it: the PPMd row in set order, rounded to float16
+  float row[208];
+  uint16_t half[208];
+  for (int i = 0; i < 208; ++i) row[i] = ppmd[s.vocab_bytes[i]];
+  RowToHalves(row, half);
+  // the channels as Feed() makes them for a stream row, the match as SetMatch()
+  fx2::PaketChannels ch;
+  ch.prev1 = s.pk_prev1;
+  ch.prev2 = s.pk_prev2;
+  if (match_len < 0) match_len = 0;
+  if (match_len > 255) match_len = 255;
+  ch.match_byte = (match_byte >= 0 && match_byte < 256 && InSet(match_byte)) ? g_b2i[match_byte] : 208;
+  ch.match_class = MatchLengthClass(match_len) & 15;
+  s.opt->spec_run((uint8_t)s.byte_to_index[byte], half, ch);
+}
+#endif
 
 void Tf1Engine::ReportChannels() const {
   if (impl_->max_doc_rows > kMaxArticleTokens) {

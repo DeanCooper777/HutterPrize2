@@ -83,6 +83,23 @@ class Tf1Engine {
   const float* LastHidden() const;
   int HiddenSize() const;
   const float* LastKey() const;
+#if defined(NEIF_TEST) && defined(NEIF_MT)
+  // NEIF_MT (src/neif_mt.h): the speculative step for a guessed stream byte.
+  // SpecPossible (main thread, start of the byte): as far as the driver can
+  // tell now, the Step() behind this byte feeds the byte's token as a read
+  // row (not gated, no alias or timestamp row, nothing in the row queue).
+  // SpecMark (main thread): a speculation is about to be posted.
+  // SpecRun (transformer thread): the network row Step() would feed for
+  // `byte`, with the prior made from `ppmd` (the PPMd row behind that byte,
+  // 256 values) and the match channel of (match_byte, match_len), as Step()
+  // makes them; the driver's own state is only read.
+  // SpecAbort (main thread): the guess is wrong.
+  bool SpecPossible(unsigned int byte) const;
+  void SpecMark();
+  void SpecRun(const float* ppmd, unsigned int byte, int match_byte, int match_len);
+  void SpecAbort();
+  void SpecStats(unsigned long long* v) const;
+#endif
 
   // loss report; the coder accumulates no loss (see (1) in Step())
   void ReportLoss() const;

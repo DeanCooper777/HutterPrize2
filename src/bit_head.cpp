@@ -943,6 +943,18 @@ void Shutdown() {
   g_init_done = false;
 }
 
+#ifdef NEIF_TEST
+// Chunk evaluation: the weight set for a run whose first corrected bit lies
+// behind the metadata block (text set 1, or text set 2 from page 143,227 of
+// the order on), as Adjust() would have chosen it on the way.  Called before
+// the first Adjust(), so the window is empty and the state is zero.
+void NeifSyncSlot() {
+  Head& s = g_head;
+  const int soll = tf_gate::ctx.pages >= (unsigned int)143227 ? 2 : 1;
+  while (s.slot < soll) s.NextSlot();
+}
+#endif
+
 __attribute__((noinline))
 unsigned int Adjust(unsigned int base_p, const float* stage1, int n_stage1,
                     float m1raw, int override_active) {

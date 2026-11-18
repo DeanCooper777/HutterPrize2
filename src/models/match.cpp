@@ -63,3 +63,38 @@ void Match::ByteUpdate() {
   *longest_match_ = std::max(*longest_match_, match_context);
 }
 
+
+#if defined(NEIF_TEST) && defined(NEIF_MT)
+// NEIF_MT (match.h): the state behind the byte g, without writing.  Follows
+// Perceive() bit by bit (a matching bit lengthens the match, another one ends
+// it), then ByteUpdate(): a match shorter than 8 bits is looked up anew under
+// the next context, where the entry Perceive() will write on the 8th bit
+// (under the present context) is taken into account, a longer one moves on by
+// one byte; the byte at the match position is g itself if that is the
+// position g will be written to.
+void Match::Peek(int g, unsigned int order, unsigned int hash_bits, unsigned long long mgr_hist_pos,
+                 unsigned char* byte, unsigned char* len) const {
+  unsigned char l = match_length_;
+  for (int j = 7; j >= 0; --j) {
+    if (((g >> j) & 1) == ((cur_byte_ >> j) & 1)) {
+      if (l < 255) ++l;
+    } else {
+      l = 0;
+    }
+  }
+  unsigned long long cm;
+  if (l < 8) {
+    const unsigned long long next =
+        order ? ((byte_context_ * (1ull << hash_bits) + (unsigned long long)(g & 255)) &
+                 (((unsigned long long)1 << (hash_bits * order)) - 1))
+              : 0;
+    const unsigned long long k2 = map_div_.Mod(next), k1 = map_div_.Mod(byte_context_);
+    cm = k2 == k1 ? (unsigned long long)(unsigned int)history_pos_ : (unsigned long long)map_[k2];
+  } else {
+    cm = cur_match_ + 1;
+  }
+  cm = hist_div_.Mod(cm);
+  *byte = cm == mgr_hist_pos ? (unsigned char)g : history_[cm];
+  *len = l;
+}
+#endif

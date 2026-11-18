@@ -53,6 +53,16 @@ void qsparse4_i32(const QSparse4& m, const uint8_t* q8, const uint16_t* idx,
 void qsparse4_dense_f32(const QSparse4& m, const uint8_t* q8, float* out);
 void qsparse4_dense_add(const QSparse4& m, const uint8_t* q8, float* out);
 void qsparse4_dense_i32(const QSparse4& m, const uint8_t* q8, int32_t* out);
+#if defined(NEIF_TEST) && defined(NEIF_MT)
+// NEIF_MT (src/neif_mt.h): qsparse4_add in two steps.  qsparse4_accum_part:
+// the int32 sums acc[192] (64-byte aligned) over the columns idx[0..nnz) and
+// their correction term (the return value); idx needs 10 readable entries
+// behind nnz (prefetch).  The sums and corrections of any partition of the
+// column list add up exactly to those of the whole list.  qsparse4_epi_add:
+// the one float step, out += float(acc - corr) * fold.
+int32_t qsparse4_accum_part(const QSparse4& m, const uint8_t* q8, const uint16_t* idx, int nnz, int32_t* acc);
+void qsparse4_epi_add(const QSparse4& m, const int32_t* acc, int32_t corr, float* out);
+#endif
 
 // Build the nonzero index list of q8[0..n) (e.g. the quantized prior).
 // Writes in 16 B blocks: idx must have n + 8 entries of room; slack entries

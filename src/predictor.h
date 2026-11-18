@@ -46,6 +46,9 @@
 #include <memory>
 #include <optional>
 #include <array>
+#if defined(NEIF_TEST) && defined(NEIF_MT)
+#include <atomic>
+#endif
 
 class Predictor {
  public:
@@ -80,6 +83,43 @@ class Predictor {
   void SemLearn(int bit);
   // the semantic-cache columns of the BITLSTM row (Predict(), every bit)
   void SemAppend();
+#ifdef NEIF_TEST
+  // chunk evaluation (src/neif_test.h): the structure-only pass
+  void NeifSkipByte(unsigned int byte);   // one stream or injected byte: automata only
+  void NeifSkipSync();                    // the PPMd restarts of the block ends
+  void NeifSkipEnd();                     // before the first byte the model runs on
+  // pipeline (src/neif_test.h)
+  void NeifPipePrepare();                 // before the fork
+  void NeifFrontByte(unsigned int byte);  // a front stage: one model byte
+  void NeifFrontDrop();                   // a front stage: the tables of the coder stage go
+  void NeifPpmdDisown() { byte_model_->NeifDisown(); }   // a stage without the PPMd model
+#ifdef NEIF_MT
+  // NEIF_MT (src/neif_mt.h): speculation on the next transformer step.
+  // NeifSpecLaunch (main thread, at the start of a stream byte, behind
+  // SemByteStart): the model byte of this stream byte is guessed to be g; the
+  // transformer thread updates PPMd with g (undo journal) and runs the
+  // network row Step() will ask for if the guess holds.  NeifPpmdByteUpdate
+  // (in Perceive(), in place of byte_model_->ByteUpdate()): takes the PPMd
+  // result of the speculation if the byte is g, undoes it otherwise.
+  void NeifSpecLaunch(int g);
+  void NeifPpmdByteUpdate();
+  void NeifSpecReport(FILE* f);
+  static void NeifSpecJob(void* self);
+  PPMD::PPMD* neif_ppmd_shadow_ = nullptr;   // the second wrapper on the PPMd model
+  unsigned int neif_spec_byte_ = 0;          // the byte it updates with
+  struct NeifSpec {
+    int g = 0, mbyte = -1, mlen = 0;
+    bool live = false;                       // a speculation of this byte is out
+    std::atomic<int> ppmd_done{0};           // its PPMd part is finished
+    unsigned long long launched = 0, not_possible = 0, ppmd_kept = 0, ppmd_undone = 0;
+  } neif_spec_;
+#endif
+#ifdef NEIF_PAR
+  // NEIF_PAR (src/neif_test.h): the byte-level predictions at the start of the
+  // stream byte c, handed to the measurement; reads only
+  void NeifParByteStart(int c);
+#endif
+#endif
 
  private:
   void SemInit();

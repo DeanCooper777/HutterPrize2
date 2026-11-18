@@ -142,6 +142,15 @@ void attn_step_var(const AttnKVF32& kv, const int8_t* q192, const float* coef3,
                    const float* sv3, int n, float* out192,
                    float skip_threshold, int* kept3 = nullptr);
 
+#if defined(NEIF_TEST) && defined(NEIF_MT)
+// NEIF_MT (src/neif_mt.h): the step of the int8 cache for n valid slots (the
+// variable or the fixed kernel, exact softmax) with the window split over the
+// threads of the pool; the same bytes in out192 as attn_step_var /
+// attn_step_fixed (attn.cpp says why).  Only while the pool is on.
+void attn_step_mt(const AttnKV& kv, const int8_t* q192, const float* coef3,
+                  const float* sv3, int n, float* out192);
+#endif
+
 // fixed-shape kernel: exactly 1024 valid slots, fully specialized loops
 void attn_step_fixed(const AttnKV& kv, const int8_t* q192, const float* coef3,
                      const float* sv3, float* out192, float skip_threshold,

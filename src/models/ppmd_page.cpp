@@ -220,6 +220,33 @@ __attribute__((noinline)) static int ZweiZahlen(const char* b, unsigned long lon
   *c = (unsigned long long)strtol(e1, &e2, 10);
   return e2 == e1 ? 1 : 2;
 }
+#ifdef NEIF_TEST
+// Pipeline (src/neif_test.h): the pool is sized from the resident memory of
+// the process, and after the fork most of that memory belongs to the coder
+// stage.  The stage with the PPMd model reads its own statm and adds the
+// private resident memory of the coder stage (the statm opened before the
+// fork), so that the stages together stay under the clamp as one process does.
+// The pool size does not change the model output.
+static int neif_peer_fd = -1;
+void neif_fork_child(void) {
+  if (V.statmfd < 0) return;
+  neif_peer_fd = V.statmfd;
+  V.statmfd = open("/proc/self/statm", O_RDONLY|O_CLOEXEC);
+  if (V.statmfd < 0) V.dyn_aus = 1;
+}
+// noinline, a plain call in dyn_pruefe(): its PGO profile entry stays
+__attribute__((noinline)) static unsigned long long neif_peer_kib(void) {
+  if (neif_peer_fd < 0) return 0;
+  char b[128];
+  const ssize_t n = pread(neif_peer_fd, b, sizeof(b)-1, 0);
+  if (n <= 0) return 0;
+  b[n] = 0;
+  char* e = b;
+  const long ges = strtol(e, &e, 10), res = strtol(e, &e, 10), shr = strtol(e, &e, 10);
+  (void)ges;
+  return res > shr ? (unsigned long long)(res - shr) * 4ULL : 0ULL;
+}
+#endif
 // Choose the pool size: how much room does the rest of the process (fremd_kib)
 // leave under the upper bound minus the safety margin (deckel)?
 static void dyn_pruefe(void) {
@@ -231,7 +258,11 @@ static void dyn_pruefe(void) {
   b[n] = 0;
   unsigned long long ges = 0, res = 0;
   if (ZweiZahlen(b, &ges, &res) != 2) return;
+#ifdef NEIF_TEST
+  const unsigned long long rss_kib = res * 4ULL + neif_peer_kib();
+#else
   const unsigned long long rss_kib = res * 4ULL;
+#endif
   if (rss_kib > V.dyn_rss_spitze_kib) V.dyn_rss_spitze_kib = rss_kib;
   const unsigned long long eigen_kib = ((V.rahmen + SPIEGEL) * SEITE) >> 10;
   const unsigned long long fremd_kib =
@@ -660,5 +691,48 @@ void kopiere(unsigned char* ziel, const unsigned char* quelle, unsigned long lon
     quelle += st; ziel += st; n -= st;
   }
 }
+
+#if defined(NEIF_TEST) && defined(NEIF_MT)
+// NEIF_MT: the undo journal (ppmd_page.h).  One thread at a time is inside
+// the PPMd model, so nothing here is guarded.
+int jn_on = 0;
+namespace {
+struct JnE { unsigned char* a; unsigned int len, off; };
+enum { JN_E = 1 << 17, JN_B = 16 << 20 };
+JnE* jn_e = nullptr;
+unsigned char* jn_b = nullptr;
+unsigned long long jn_n = 0, jn_used = 0;
+}  // namespace
+void jn_begin(void) {
+  if (!jn_e) {
+    jn_e = (JnE*)malloc(sizeof(JnE) * JN_E);
+    jn_b = (unsigned char*)malloc(JN_B);
+    if (!jn_e || !jn_b) abort();
+  }
+  jn_n = jn_used = 0;
+  jn_on = 1;
+}
+void jn_note(unsigned char* a, const unsigned char* p, unsigned long long len) {
+  if ((unsigned long long)(a - V.heap) >= V.heapgr) return;   // not a heap object
+  if (jn_n == JN_E || jn_used + len > JN_B) {
+    fprintf(stderr, "\nneif_mt: the PPMd undo journal is full (%llu entries, %llu bytes)\n", jn_n, jn_used);
+    abort();
+  }
+  jn_e[jn_n].a = a;
+  jn_e[jn_n].len = (unsigned int)len;
+  jn_e[jn_n].off = (unsigned int)jn_used;
+  memcpy(jn_b + jn_used, p, (size_t)len);
+  jn_used += len;
+  ++jn_n;
+}
+void jn_stop(void) { jn_on = 0; }
+void jn_keep(void) { jn_on = 0; jn_n = jn_used = 0; }
+void jn_undo(void) {
+  jn_on = 0;
+  for (unsigned long long i = jn_n; i-- > 0;)
+    memcpy(xl_w(jn_e[i].a, jn_e[i].len), jn_b + jn_e[i].off, jn_e[i].len);
+  jn_n = jn_used = 0;
+}
+#endif
 
 } // namespace ppmd_page

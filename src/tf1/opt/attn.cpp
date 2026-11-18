@@ -23,6 +23,9 @@
 //      into 8 fp32 accumulators; (sv/den) folded into one final multiply.
 #include "attn.h"
 #include "../tf1_config.h"
+#if defined(NEIF_TEST) && defined(NEIF_MT)
+#include "../../neif_mt.h"   // threads for the transformer step (attn_step_mt below)
+#endif
 
 #include <immintrin.h>
 
@@ -766,6 +769,204 @@ inline void kt_insert_head(int16_t* dst_pair0, const int8_t* k64) {
 }
 
 }  // namespace
+
+#if defined(NEIF_TEST) && defined(NEIF_MT)
+// ---------------------------------------------------------------------------
+// NEIF_MT (src/neif_mt.h): attn_impl_shkv with the window split by position
+// over the threads of the pool.  Why the bytes are the same as on one thread:
+//   scan   the scores are exact int32 dots times one float, position by
+//          position, with the instructions of qk_scan3.  The running maximum
+//          is an ordered float reduction (the sign of a zero maximum depends
+//          on the order): every thread stores the maximum of each block of
+//          32 positions, and the caller folds them in block order with the
+//          expression of qk_scan3; the tail of the variable kernel is scanned
+//          by the caller as before.
+//   exp    element-wise (the float sum of exp_pass is not used on this path)
+//   quant  element-wise, the weight sum is an int32 sum
+//   PV     int32 sums over the pairs, one float multiply per output at the
+//          end (pv_int_pairs3 is unchunked for every length: EQ_CHUNK pairs
+//          cover the window)
+// Two regions: the scan, then exp + quant + PV, with the fold between them.
+// The buffers g_sc3, g_eb3, g_ep3 are written in disjoint position ranges
+// (borders at multiples of 32 positions).
+// ---------------------------------------------------------------------------
+namespace {
+struct MtAttn {
+  const int8_t* k;                 // kv.k[0]
+  const int8_t* v;                 // kv.v[0]
+  const int32_t (*qp32)[32];
+  const float* coef3;
+  int n, nDB, G, np, nth;
+  float thr;
+  float m3[ATTN_NH];
+  alignas(32) float bmax[ATTN_NH][ATTN_WIN / 32][8];
+  struct alignas(64) Part {
+    __m256i acc[2][ATTN_NH][4];
+    int32_t sq[ATTN_NH];
+  } part[neif_mt::kMax];
+};
+
+void mt_attn_scan(int s, void* a) {
+  MtAttn& j = *static_cast<MtAttn*>(a);
+  const int b0 = j.nDB * s / j.nth, b1 = j.nDB * (s + 1) / j.nth;
+  const __m256 vc0 = _mm256_set1_ps(j.coef3[0]);
+  const __m256 vc1 = _mm256_set1_ps(j.coef3[1]);
+  const __m256 vc2 = _mm256_set1_ps(j.coef3[2]);
+  const int8_t* kb = j.k + static_cast<size_t>(b0) * 2048;
+  for (int bb = b0; bb < b1; bb++, kb += 2048) {
+    for (int half = 0; half < 2; half++) {
+      const int8_t* k1 = kb + half * 1024;
+      __m256i a00 = _mm256_setzero_si256(), a01 = a00, a10 = a00, a11 = a00, a20 = a00, a21 = a00;
+      for (int i = 0; i < 32; i++) {
+        if (!(i & 1))
+          _mm_prefetch(reinterpret_cast<const char*>(k1 + AK1_QKPF + i * 32), _MM_HINT_T0);
+        const KH h = ldk2(k1 + i * 32);
+        const __m256i q0 = _mm256_set1_epi32(j.qp32[0][i]);
+        a00 = _mm256_add_epi32(a00, _mm256_madd_epi16(q0, h.lo));
+        a01 = _mm256_add_epi32(a01, _mm256_madd_epi16(q0, h.hi));
+        const __m256i q1 = _mm256_set1_epi32(j.qp32[1][i]);
+        a10 = _mm256_add_epi32(a10, _mm256_madd_epi16(q1, h.lo));
+        a11 = _mm256_add_epi32(a11, _mm256_madd_epi16(q1, h.hi));
+        const __m256i q2 = _mm256_set1_epi32(j.qp32[2][i]);
+        a20 = _mm256_add_epi32(a20, _mm256_madd_epi16(q2, h.lo));
+        a21 = _mm256_add_epi32(a21, _mm256_madd_epi16(q2, h.hi));
+      }
+      const int o = bb * 32 + half * 16;
+      _mm256_store_ps(g_sc3[0] + o, _mm256_mul_ps(_mm256_cvtepi32_ps(a00), vc0));
+      _mm256_store_ps(g_sc3[0] + o + 8, _mm256_mul_ps(_mm256_cvtepi32_ps(a01), vc0));
+      _mm256_store_ps(g_sc3[1] + o, _mm256_mul_ps(_mm256_cvtepi32_ps(a10), vc1));
+      _mm256_store_ps(g_sc3[1] + o + 8, _mm256_mul_ps(_mm256_cvtepi32_ps(a11), vc1));
+      _mm256_store_ps(g_sc3[2] + o, _mm256_mul_ps(_mm256_cvtepi32_ps(a20), vc2));
+      _mm256_store_ps(g_sc3[2] + o + 8, _mm256_mul_ps(_mm256_cvtepi32_ps(a21), vc2));
+    }
+    // the block's maximum, the inner expression of qk_scan3's running maximum
+    const int o = bb * 32;
+    for (int h = 0; h < ATTN_NH; h++)
+      _mm256_store_ps(j.bmax[h][bb],
+                      _mm256_max_ps(_mm256_max_ps(_mm256_load_ps(g_sc3[h] + o), _mm256_load_ps(g_sc3[h] + o + 8)),
+                                    _mm256_max_ps(_mm256_load_ps(g_sc3[h] + o + 16),
+                                                  _mm256_load_ps(g_sc3[h] + o + 24))));
+  }
+}
+
+void mt_attn_pv(int s, void* a) {
+  MtAttn& j = *static_cast<MtAttn*>(a);
+  const bool last = s + 1 == j.nth;
+  const int b0 = j.nDB * s / j.nth, b1 = j.nDB * (s + 1) / j.nth;
+  const int g0 = 4 * b0, g1 = last ? j.G : 4 * b1;       // groups of 8 positions
+  const int p0 = 16 * b0, p1 = last ? j.np : 16 * b1;    // pairs of positions
+  MtAttn::Part& pt = j.part[s];
+  const __m256 vthr = _mm256_set1_ps(-j.thr);
+  const __m256 vmax = _mm256_set1_ps(static_cast<float>(EQ_MAX));
+  for (int h = 0; h < ATTN_NH; h++) {
+    const __m256 vm = _mm256_set1_ps(j.m3[h]);
+    const float* sc = g_sc3[h];
+    float* eb = g_eb3[h];
+    int32_t* ep = g_ep3[h];
+    __m256i vs = _mm256_setzero_si256();
+    for (int g = g0; g < g1; g++) {
+      // exp_pass: e = exp(score - max), 0 where the lane is excluded
+      const __m256 d = _mm256_sub_ps(_mm256_load_ps(sc + 8 * g), vm);
+      const __m256 k = _mm256_cmp_ps(d, vthr, _CMP_GE_OQ);
+      const __m256 e = _mm256_and_ps(exp256_ps(d), k);
+      _mm256_store_ps(eb + 8 * g, e);
+      // quant_e_pairs
+      const __m256i x = _mm256_cvtps_epi32(_mm256_mul_ps(e, vmax));
+      vs = _mm256_add_epi32(vs, x);
+      const __m256i ev = _mm256_shuffle_epi32(x, _MM_SHUFFLE(2, 0, 2, 0));
+      const __m256i od = _mm256_shuffle_epi32(x, _MM_SHUFFLE(3, 1, 3, 1));
+      const __m256i pr = _mm256_or_si256(ev, _mm256_slli_epi32(od, 16));
+      _mm_storel_epi64(reinterpret_cast<__m128i*>(ep + 4 * g), _mm256_castsi256_si128(pr));
+      _mm_storel_epi64(reinterpret_cast<__m128i*>(ep + 4 * g + 2), _mm256_extracti128_si256(pr, 1));
+    }
+    __m128i lo = _mm_add_epi32(_mm256_castsi256_si128(vs), _mm256_extracti128_si256(vs, 1));
+    lo = _mm_add_epi32(lo, _mm_shuffle_epi32(lo, _MM_SHUFFLE(1, 0, 3, 2)));
+    lo = _mm_add_epi32(lo, _mm_shuffle_epi32(lo, _MM_SHUFFLE(2, 3, 0, 1)));
+    pt.sq[h] = _mm_cvtsi128_si32(lo);
+  }
+  // pv_int_pairs3 over the pairs [p0, p1): the int32 sums of this range
+  for (int half = 0; half < 2; half++) {
+    __m256i a00 = _mm256_setzero_si256(), a01 = a00, a02 = a00, a03 = a00;
+    __m256i a10 = a00, a11 = a00, a12 = a00, a13 = a00;
+    __m256i a20 = a00, a21 = a00, a22 = a00, a23 = a00;
+    const int8_t* vp = j.v + static_cast<size_t>(p0) * 2 * ATTN_DH + half * 64;
+    for (int p = p0; p < p1; p++, vp += 2 * ATTN_DH) {
+      _mm_prefetch(reinterpret_cast<const char*>(vp + AK1_PVPFB1), _MM_HINT_T0);
+      const __m256i q0 = _mm256_set1_epi32(g_ep3[0][p]);
+      const __m256i q1 = _mm256_set1_epi32(g_ep3[1][p]);
+      const __m256i q2 = _mm256_set1_epi32(g_ep3[2][p]);
+#define MT_PV3_T(T, A0, A1, A2)                                               \
+  {                                                                           \
+    const __m256i x = _mm256_cvtepi8_epi16(                                   \
+        _mm_load_si128(reinterpret_cast<const __m128i*>(vp + 16 * (T))));     \
+    A0 = _mm256_add_epi32(A0, _mm256_madd_epi16(q0, x));                      \
+    A1 = _mm256_add_epi32(A1, _mm256_madd_epi16(q1, x));                      \
+    A2 = _mm256_add_epi32(A2, _mm256_madd_epi16(q2, x));                      \
+  }
+      MT_PV3_T(0, a00, a10, a20) MT_PV3_T(1, a01, a11, a21)
+      MT_PV3_T(2, a02, a12, a22) MT_PV3_T(3, a03, a13, a23)
+#undef MT_PV3_T
+    }
+    pt.acc[half][0][0] = a00; pt.acc[half][0][1] = a01; pt.acc[half][0][2] = a02; pt.acc[half][0][3] = a03;
+    pt.acc[half][1][0] = a10; pt.acc[half][1][1] = a11; pt.acc[half][1][2] = a12; pt.acc[half][1][3] = a13;
+    pt.acc[half][2][0] = a20; pt.acc[half][2][1] = a21; pt.acc[half][2][2] = a22; pt.acc[half][2][3] = a23;
+  }
+}
+}  // namespace
+
+void attn_step_mt(const AttnKV& kv, const int8_t* q192, const float* coef3, const float* sv3, int n,
+                  float* out192) {
+  static_assert(!(EQ_CHUNK < (ATTN_WIN + 1) / 2), "the pair sums must be unchunked");
+  alignas(32) int32_t qp32[ATTN_NH][32];
+  for (int h = 0; h < ATTN_NH; h++) {
+    const int8_t* qh = q192 + h * ATTN_DH;
+    for (int c = 0; c < 4; c++)
+      _mm256_store_si256(reinterpret_cast<__m256i*>(qp32[h] + c * 8),
+                         _mm256_cvtepi8_epi16(_mm_loadu_si128(reinterpret_cast<const __m128i*>(qh + c * 16))));
+  }
+  static MtAttn j;   // one attention step at a time
+  j.k = &kv.k[0][0][0][0];
+  j.v = &kv.v[0][0][0];
+  j.qp32 = qp32;
+  j.coef3 = coef3;
+  j.n = n;
+  j.nDB = n >> 5;
+  j.G = (n + 7) >> 3;
+  j.np = (n + 1) >> 1;
+  j.nth = neif_mt::g_n;
+  j.thr = 1e30f;   // exact: every valid lane is kept, the -inf padding is not
+  neif_mt::Run(mt_attn_scan, &j);
+  // the running maximum in block order, then the tail (variable kernel), as qk_scan3
+  __m256 vm[ATTN_NH];
+  for (int h = 0; h < ATTN_NH; h++) {
+    vm[h] = _mm256_set1_ps(-INFINITY);
+    for (int bb = 0; bb < j.nDB; bb++) vm[h] = _mm256_max_ps(vm[h], _mm256_load_ps(j.bmax[h][bb]));
+  }
+  if (n & 31) {
+    const __m256 vc0 = _mm256_set1_ps(coef3[0]);
+    const __m256 vc1 = _mm256_set1_ps(coef3[1]);
+    const __m256 vc2 = _mm256_set1_ps(coef3[2]);
+    const int8_t* kt = j.k + static_cast<size_t>(j.nDB) * 2048;
+    qk_tail1(kt, qp32[0], vc0, n, j.nDB, g_sc3[0], vm[0]);
+    qk_tail1(kt, qp32[1], vc1, n, j.nDB, g_sc3[1], vm[1]);
+    qk_tail1(kt, qp32[2], vc2, n, j.nDB, g_sc3[2], vm[2]);
+  }
+  for (int h = 0; h < ATTN_NH; h++) j.m3[h] = hmax8(vm[h]);
+  neif_mt::Run(mt_attn_pv, &j);
+  // the sums of the ranges, then the float step of pv_int_pairs3
+  for (int h = 0; h < ATTN_NH; h++) {
+    int32_t sq = 0;
+    for (int s = 0; s < j.nth; s++) sq += j.part[s].sq[h];
+    const __m256 vf = _mm256_set1_ps(sv3[h] / static_cast<float>(sq));
+    for (int half = 0; half < 2; half++)
+      for (int t = 0; t < 4; t++) {
+        __m256i acc = j.part[0].acc[half][h][t];
+        for (int s = 1; s < j.nth; s++) acc = _mm256_add_epi32(acc, j.part[s].acc[half][h][t]);
+        _mm256_store_ps(out192 + h * ATTN_DH + half * 32 + 8 * t, _mm256_mul_ps(_mm256_cvtepi32_ps(acc), vf));
+      }
+  }
+}
+#endif
 
 // ---------------------------------------------------------------------------
 // public entry points

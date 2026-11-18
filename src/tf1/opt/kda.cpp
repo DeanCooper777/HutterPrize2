@@ -476,5 +476,241 @@ void kda_layer_step(const KdaWeights& w, KdaState& st, const float* q_in,
   st.pos++;
 }
 
+#if defined(NEIF_TEST) && defined(NEIF_MT)
+// ---------------------------------------------------------------------------
+// NEIF_MT (src/neif_mt.h): kda_layer_step with the head states read from S_in
+// and written to S_out (3 x 64 x 64 floats each; the same buffer gives the
+// step above).  Pass 1 of the sweep reads a row of S_in, stores the decayed
+// row to S_out and accumulates r from the stored values; pass 2 works in
+// S_out.  Every element gets the instructions of kda_layer_step in the same
+// order, so S_out, the output and the conv ring are the ones the in-place
+// step gives.  The conv ring of `st` is written in place (the slot of this
+// step holds the input of four steps ago, which no step reads); `advance`
+// says whether the position moves on (false for a speculative step, whose
+// commit moves it).  The body below is the text of kda_layer_step.
+// ---------------------------------------------------------------------------
+namespace {
+inline void pass1_15_io(const float* Sin, float* Sout, const float* decay, const float* kn, __m256 r[8]) {
+  for (int jv = 0; jv < 8; jv++) r[jv] = _mm256_setzero_ps();
+  for (int i = 0; i < 64; i++) {
+    const float* rowi = Sin + static_cast<size_t>(i) * 64;
+    float* rowo = Sout + static_cast<size_t>(i) * 64;
+    __m256 d = _mm256_broadcast_ss(decay + i);
+    __m256 kb = _mm256_broadcast_ss(kn + i);
+    for (int jv = 0; jv < 8; jv++) {
+      __m256 a = _mm256_mul_ps(_mm256_load_ps(rowi + 8 * jv), d);
+      _mm256_store_ps(rowo + 8 * jv, a);
+      r[jv] = _mm256_fmadd_ps(kb, a, r[jv]);
+    }
+  }
+}
+}  // namespace
+
+void kda_layer_step_io(const KdaWeights& w, KdaState& st, const float* S_in, float* S_out, bool advance,
+                       const float* q_in, const float* k_in, const float* v_in, const float* g_raw,
+                       const float* og, const float* beta_raw, float* out) {
+  KdaDebug* dbg = nullptr;
+  KdaProfile* prof = nullptr;
+  alignas(64) float cq[192], ck[192], cv[192];
+  alignas(64) float decay[192], kn192[192], qs192[192], o192[192];
+  alignas(64) float zb[576], eb[576];  // staging buffers (z / exp results)
+
+  const __m256 one = _mm256_set1_ps(1.0f);
+  const __m256 sign = _mm256_set1_ps(-0.0f);
+
+  uint64_t t0 = prof ? rdt() : 0;
+
+  // Scheduled state prefetch (pf mode 5, the default): one cursor walks all
+  // 48 KB of this layer's head states under the front-end's compute-heavy
+  // staged passes (~700 prefetcht0 metered at ~1 line / 7 cycles, ~9 B/c - 
+  // well under the 22.7 B/c L3 read budget), so every sweep pass runs on an
+  // L1/L2-warm state. Sweep-side prefetching measured strictly worse (it
+  // steals AGU slots and L1 fill ports from the store-saturated pass 1).
+  const char* pfc = reinterpret_cast<const char*>(S_in);
+  const char* pfe =
+      (g_pf_mode == 5 || g_pf_mode == 6) ? pfc + sizeof(st.S) : pfc;
+  const bool pft1 = g_pf_mode == 6;
+
+  // ---- conv (staged): tap-z pass (+ring update), one exp pass over all
+  //      3*192 channels, then the silu division fused with the q/k
+  //      l2norm sum-of-squares accumulation ----
+  const uint32_t slot = st.pos & 3;
+  __m256 aq[3], ak[3];  // l2norm sums (bit-identical order to naive)
+  {
+    const float* in3[3] = {q_in, k_in, v_in};
+    for (int c3 = 0; c3 < 3; c3++) {
+      float(*ring)[192] = st.ring[c3];
+      const float* t0p = ring[(slot + 1) & 3];
+      const float* t1p = ring[(slot + 2) & 3];
+      const float* t2p = ring[(slot + 3) & 3];
+      const float* x = in3[c3];
+      float* slotp = ring[slot];
+      const float* wt = w.conv_w[c3];
+      float* z3 = zb + 192 * c3;
+      for (int c = 0; c < 192; c += 8) {
+        __m256 xv = _mm256_loadu_ps(x + c);
+        _mm256_store_ps(slotp + c, xv);
+        __m256 z = _mm256_mul_ps(_mm256_loadu_ps(wt + c),
+                                 _mm256_load_ps(t0p + c));
+        z = _mm256_fmadd_ps(_mm256_loadu_ps(wt + 192 + c),
+                            _mm256_load_ps(t1p + c), z);
+        z = _mm256_fmadd_ps(_mm256_loadu_ps(wt + 384 + c),
+                            _mm256_load_ps(t2p + c), z);
+        z = _mm256_fmadd_ps(_mm256_loadu_ps(wt + 576 + c), xv, z);
+        _mm256_store_ps(z3 + c, z);
+      }
+    }
+    for (int c = 0; c < 576; c += 8) {
+      pf_step<4>(pfc, pfe, pft1);
+      _mm256_store_ps(eb + c,
+                      exp256_ps(_mm256_xor_ps(_mm256_load_ps(zb + c), sign)));
+    }
+    float* out3[3] = {cq, ck, cv};
+    for (int h = 0; h < 3; h++) {
+      aq[h] = _mm256_setzero_ps();
+      ak[h] = _mm256_setzero_ps();
+    }
+    for (int c3 = 0; c3 < 3; c3++) {
+      float* y = out3[c3];
+      const float* z3 = zb + 192 * c3;
+      const float* e3 = eb + 192 * c3;
+      for (int c = 0; c < 192; c += 8) {
+        pf_step<3>(pfc, pfe, pft1);
+        __m256 r = _mm256_div_ps(_mm256_load_ps(z3 + c),
+                                 _mm256_add_ps(one, _mm256_load_ps(e3 + c)));
+        _mm256_store_ps(y + c, r);
+        if (c3 == 0) aq[c >> 6] = _mm256_fmadd_ps(r, r, aq[c >> 6]);
+        if (c3 == 1) ak[c >> 6] = _mm256_fmadd_ps(r, r, ak[c >> 6]);
+      }
+    }
+  }
+
+  uint64_t t1 = prof ? rdt() : 0;
+
+  // ---- per-channel log-decay gate, staged:
+  //      x = g_raw + dt_bias; u = exp256(x); sp = log1p(u) (blend x>20 -> x);
+  //      arg = a_neg*sp; decay = exp_full(arg). Same op sequence as
+  //      softplus256_ps + exp, staged through zb/eb. ----
+  {
+    for (int c = 0; c < 192; c += 8) {
+      pf_step<4>(pfc, pfe, pft1);
+      __m256 x = _mm256_add_ps(_mm256_loadu_ps(g_raw + c),
+                               _mm256_loadu_ps(w.dt_bias + c));
+      _mm256_store_ps(zb + c, x);
+      _mm256_store_ps(eb + c, exp256_ps(x));
+    }
+    const __m256 twenty = _mm256_set1_ps(20.0f);
+    for (int h = 0; h < 3; h++) {
+      __m256 an = _mm256_set1_ps(w.a_neg[h]);
+      for (int c = 64 * h; c < 64 * h + 64; c += 8) {
+        pf_step<2>(pfc, pfe, pft1);
+        __m256 x = _mm256_load_ps(zb + c);
+        __m256 sp = log1p256_ps(_mm256_load_ps(eb + c));
+        sp = _mm256_blendv_ps(sp, x, _mm256_cmp_ps(x, twenty, _CMP_GT_OQ));
+        _mm256_store_ps(zb + c, _mm256_mul_ps(an, sp));
+      }
+    }
+    for (int c = 0; c < 192; c += 8) {
+      pf_step<4>(pfc, pfe, pft1);
+      _mm256_store_ps(decay + c, exp_full8(_mm256_load_ps(zb + c)));
+    }
+  }
+
+  // ---- beta sigmoid (3 logits) ----
+  float beta[3];
+  {
+    alignas(32) float b8[8] = {beta_raw[0], beta_raw[1], beta_raw[2],
+                               0, 0, 0, 0, 0};
+    _mm256_store_ps(b8, sigmoid256_ps(_mm256_load_ps(b8)));
+    beta[0] = b8[0];
+    beta[1] = b8[1];
+    beta[2] = b8[2];
+  }
+
+  // ---- q/k l2norm (eps 1e-6 on the raw sum) + 0.125 q-scale;
+  //      sums were accumulated in the conv division pass ----
+  {
+    const __m256 eighth = _mm256_set1_ps(0.125f);
+    for (int h = 0; h < 3; h++) {
+      float dq = std::sqrt(hsum256v(aq[h]) + 1e-6f);
+      float dk = std::sqrt(hsum256v(ak[h]) + 1e-6f);
+      __m256 dqb = _mm256_set1_ps(dq);
+      __m256 dkb = _mm256_set1_ps(dk);
+      for (int c = 0; c < 64; c += 8) {
+        pf_step<2>(pfc, pfe, pft1);
+        __m256 qn = _mm256_div_ps(_mm256_load_ps(cq + 64 * h + c), dqb);
+        _mm256_store_ps(qs192 + 64 * h + c, _mm256_mul_ps(eighth, qn));
+        _mm256_store_ps(kn192 + 64 * h + c,
+                        _mm256_div_ps(_mm256_load_ps(ck + 64 * h + c), dkb));
+      }
+    }
+  }
+
+  uint64_t t2 = prof ? rdt() : 0;
+
+  // ---- the three head sweeps (next head's state prefetched in pass 1) ----
+  for (int h = 0; h < 3; h++) {
+    // sweep_head_t<0, 0> of the 1.5-pass variant with the decayed rows going to S_out
+    float* So = S_out + static_cast<size_t>(h) * 64 * 64;
+    alignas(32) float u[64];
+    __m256 r[8];
+    pass1_15_io(S_in + static_cast<size_t>(h) * 64 * 64, So, decay + 64 * h, kn192 + 64 * h, r);
+    __m256 bb = _mm256_set1_ps(beta[h]);
+    for (int jv = 0; jv < 8; jv++) {
+      __m256 uv = _mm256_mul_ps(bb, _mm256_sub_ps(_mm256_loadu_ps(cv + 64 * h + 8 * jv), r[jv]));
+      _mm256_store_ps(u + 8 * jv, uv);
+    }
+    pass2_15<0>(So, kn192 + 64 * h, qs192 + 64 * h, u, o192 + 64 * h, So);
+  }
+
+  uint64_t t3 = prof ? rdt() : 0;
+
+  // ---- gated rms norm: rmsnorm64(o)*w*sigmoid(og), sigmoid staged ----
+  {
+    // three per-head sums interleaved (each keeps the naive serial order)
+    __m256 ao[3];
+    for (int h = 0; h < 3; h++) ao[h] = _mm256_setzero_ps();
+    for (int c = 0; c < 64; c += 8)
+      for (int h = 0; h < 3; h++) {
+        __m256 vo = _mm256_load_ps(o192 + 64 * h + c);
+        ao[h] = _mm256_fmadd_ps(vo, vo, ao[h]);
+      }
+    for (int c = 0; c < 192; c += 8)
+      _mm256_store_ps(eb + c,
+                      exp256_ps(_mm256_xor_ps(_mm256_loadu_ps(og + c), sign)));
+    for (int h = 0; h < 3; h++) {
+      float ss = hsum256v(ao[h]);
+      float rstd = 1.0f / std::sqrt(ss / 64.0f + 1e-5f);
+      __m256 rb = _mm256_set1_ps(rstd);
+      for (int c = 0; c < 64; c += 8) {
+        __m256 sg = _mm256_div_ps(one,
+                                  _mm256_add_ps(one, _mm256_load_ps(eb + 64 * h + c)));
+        __m256 t = _mm256_mul_ps(_mm256_load_ps(o192 + 64 * h + c), rb);
+        t = _mm256_mul_ps(t, _mm256_loadu_ps(w.gn_w + c));
+        _mm256_storeu_ps(out + 64 * h + c, _mm256_mul_ps(t, sg));
+      }
+    }
+  }
+
+  if (prof) {
+    uint64_t t4 = rdt();
+    prof->conv += t1 - t0;
+    prof->gates += t2 - t1;
+    prof->sweep += t3 - t2;
+    prof->norm += t4 - t3;
+  }
+
+  if (dbg) {
+    if (dbg->conv_q) std::memcpy(dbg->conv_q, cq, sizeof(cq));
+    if (dbg->conv_k) std::memcpy(dbg->conv_k, ck, sizeof(ck));
+    if (dbg->conv_v) std::memcpy(dbg->conv_v, cv, sizeof(cv));
+    if (dbg->kda_out) std::memcpy(dbg->kda_out, o192, sizeof(o192));
+  }
+
+  if (advance) st.pos++;
+}
+
+#endif
+
 }  // namespace opt
 }  // namespace fx2

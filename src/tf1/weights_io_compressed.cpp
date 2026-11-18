@@ -747,6 +747,23 @@ WeightsFile WeightsFile::load_compressed(const char* path) {
   // reader decodes (it was a second read of the file in the engine)
   unsigned long long h = 14695981039346656037ULL;
   for (size_t i = 0; i < n; i++) h = (h ^ buf[i]) * 1099511628211ULL;
+#ifdef NEIF_TEST
+  // Test-only (never in the entry): NEIF_T_WEIGHTS_ANY=1 lets the chunk mode
+  // load a container with another fingerprint (retrained weights in the same
+  // format NP2 and of the same architecture).  Default off: without the
+  // switch the check below is the entry's.  The magic, which the fingerprint
+  // otherwise fixes, is checked here instead; the override is reported.
+  const char* neif_any = std::getenv("NEIF_T_WEIGHTS_ANY");
+  if (h != 0xaec368ac6a568632ULL && neif_any && neif_any[0] == '1') {
+    if (n < 24 || std::memcmp(buf, "FX2TFWP5", 8) != 0) {
+      std::fprintf(stderr, "neif_test: %s is not a container of format NP2\n", path);
+      std::exit(3);
+    }
+    std::fprintf(stderr, "neif_test: NEIF_T_WEIGHTS_ANY=1: container %s, %zu B, fingerprint %016llx "
+                         "(not the shipped aec368ac6a568632), loaded anyway\n", path, n, h);
+    h = 0xaec368ac6a568632ULL;
+  }
+#endif
   if (h != 0xaec368ac6a568632ULL)
     msg_stop(207)
 ;

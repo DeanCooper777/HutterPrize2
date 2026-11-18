@@ -1,5 +1,8 @@
 #include "../invariants.h"
 #include "encoder.h"
+#ifdef NEIF_TEST
+#include "../neif_test.h"   // chunk evaluation: bit costs
+#endif
 __attribute__((cold)) Encoder::Encoder(FILE* os, Predictor* p) : os_(os), x1_(0),
     x2_(0xffffffff), p_(p) {
   // Register the per-byte channel BEFORE Init(): Init() builds the
@@ -35,29 +38,64 @@ void Encoder::Encode(int bit) {
     p_->Perceive(bit);
     return;
   }
+#ifdef NEIF_TEST
+  // chunk evaluation, second cost sum: the same statement as below with the
+  // return value of Predict() kept, so that its cost can be summed in front
+  // of BITLSTM, the floor stage and the semantic-cache correction
+  const float neif_tap_p = p_->Predict();
+  neif_test::CostTap(neif_tap_p, bit);
+  unsigned int p = Discretize(neif_tap_p);
+#else
   unsigned int p = Discretize(p_->Predict());
+#endif
   int bb_bitl = 0;
   if (bit_head::Enabled()
       && !bit_head::AuxOff()
       && !bit_head::MetaOff()
       && !p_->AdepthSkipped()
       ) {
+#ifdef NEIF_TEST
+    neif_test::T(11);   // profile mark: BITLSTM
+#endif
     p = bit_head::Adjust(p, p_->bitl_stage1_, p_->bitl_n_stage1_,
                           p_->bitl_m1raw_, p_->bitl_override_);
     bb_bitl = p_->bitl_override_ ? 0 : 1;
   }
+#ifdef NEIF_TEST
+  neif_test::T(12);   // profile mark: floor stage, end stages
+  // chunk evaluation: the same call sequence as below, with the final 32-bit
+  // probability kept in a variable so that its cost can be summed
+  const uint32_t neif_p32 = p_->SemCorrect(floor_.P32(p,
+      p_->bitl_override_,
+      p_->AdepthSkipped() ? 1 : 0,
+      bb_bitl, p_->bb_z_, p_->bitl_m1raw_, bit_head::MetaOff() ? 1 : 0,
+      (31 - __builtin_clz(p_->BbBitCtx() | 1u)) & 7));
+  neif_test::Cost(neif_p32, bit);
+  const unsigned int xmid = floor_stage::Mid(x1_, x2_, neif_p32);
+#else
   const unsigned int xmid = floor_stage::Mid(x1_, x2_, p_->SemCorrect(floor_.P32(p,
       p_->bitl_override_,
       p_->AdepthSkipped() ? 1 : 0,
       bb_bitl, p_->bb_z_, p_->bitl_m1raw_, bit_head::MetaOff() ? 1 : 0,
       (31 - __builtin_clz(p_->BbBitCtx() | 1u)) & 7)));
+#endif
   if (bit) {
     x2_ = xmid;
   } else {
     x1_ = xmid + 1;
   }
   floor_.Update(bit);
+#ifdef NEIF_TEST
+  neif_test::T(13);   // profile mark: end stages learn
+#endif
   p_->SemLearn(bit);
+#ifdef NEIF_TEST
+#ifdef NEIF_PAR
+  neif_test::T(16);   // NEIF_PAR: BITLSTM behind the coded bit, apart from its part in front (section 11)
+#else
+  neif_test::T(11);   // profile mark: BITLSTM
+#endif
+#endif
   if (bit_head::Enabled()
       && !bit_head::AuxOff()
       && !bit_head::MetaOff()

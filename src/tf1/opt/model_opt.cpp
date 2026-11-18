@@ -27,6 +27,9 @@
 #include "model_opt.h"
 #include "../../cold_size.h"
 #include "../../semantic_cache.h"
+#ifdef NEIF_TEST
+#include "../../neif_test.h"   // chunk evaluation: pipeline stages
+#endif
 
 #include <immintrin.h>
 
@@ -47,6 +50,12 @@
 #include "kda_math.h"
 #include "qmat_dense.h"
 #include "qmat_sparse.h"
+#ifdef NEIF_TEST
+#include "act16_test.h"   // experiment: 16-bit activations (NEIF_ACT16)
+#ifdef NEIF_MT
+#include "../../neif_mt.h"   // threads for the transformer step (NEIF_MT)
+#endif
+#endif
 
 // Debug-only component isolation for the naive-vs-opt cross-check (never
 // defined in the production build targets): swap the fused KDA step and/or
@@ -499,6 +508,14 @@ struct TransformerOptImpl : ZRow {
     gelesen = true;
     fw_gel = true;
     M.load(path);
+#ifdef NEIF_TEST
+    act16::init();   // NEIF_ACT16: the site groups with 16-bit activations
+    if (act16::g_mask) {
+      std::fprintf(stderr, "neif_act16: mlp widths");
+      for (int l = 0; l < NL; l++) std::fprintf(stderr, " %d", M.mlp[l].down.d_in);
+      std::fprintf(stderr, "\n");
+    }
+#endif
     const size_t kda_sz = sizeof(KdaState) * NKIMI;
     const size_t kv_sz =
         (kind == AttnKind::KVF32 ? sizeof(AttnKVF32) : sizeof(AttnKV)) * NVAN;
@@ -520,6 +537,9 @@ struct TransformerOptImpl : ZRow {
   void begin(int64_t rope_position_offset) {
     zb_run();
     for (int i = 0; i < NKIMI; i++) kda_layer_reset(kst[i]);
+#if defined(NEIF_TEST) && defined(NEIF_MT)
+    for (int i = 0; i < NKIMI; i++) kS_cur[i] = nullptr;   // NEIF_MT: the (zeroed) states in kst are the committed ones
+#endif
 #ifdef FX2_XCHECK_NAIVE_KDA
     std::memset(nkst.data(), 0, sizeof(NaiveKst) * NKIMI);
 #endif
@@ -596,8 +616,208 @@ struct TransformerOptImpl : ZRow {
   }
 
   // kimi (KDA) layer ki for the rows r[0, n); the output goes to each row's ar_f
+#ifdef NEIF_TEST
+  // NEIF_ACT16 (act16_test.h): the KDA layer with 16-bit codes at the chosen
+  // sites, row by row on the slow exact kernels.  A site that is not chosen
+  // gets the entry's 8-bit code and kernel.
+  __attribute__((noinline)) void kimi_layer16(int ki, ZRow* r, int n) {
+    using namespace act16;
+    KimiArenas& L = M.kimi[ki];
+    const int am = g_mask;
+    alignas(32) int16_t a16[D];
+    alignas(32) int16_t g16[DH];
+    alignas(32) float y64[DH];
+    alignas(32) float y[D];
+    for (int j = 0; j < n; j++) {
+      ZRow& w = r[j];
+      rms_norm192(w.x, w.xn);
+      const QSite* const s3[3] = {&L.qp, &L.kp, &L.vp};
+      float* const o3[3] = {w.a, w.b, w.c};
+      for (int k = 0; k < 3; k++) {
+        if (am & KQKV) {
+          quant(w.xn, s3[k]->s_act, a16, D);
+          dense(s3[k]->m, a16, K256, o3[k]);
+        } else {
+          quant192_u8(w.xn, s3[k]->s_act, w.q5);
+          qgemv_f32(s3[k]->m, w.q5, o3[k]);
+        }
+      }
+      const QSite* const up[2] = {&L.fg_up, &L.og_up};
+      const QSite* const dn[2] = {&L.fg_down, &L.og_down};
+      float* const go[2] = {w.graw, w.og192};
+      for (int k = 0; k < 2; k++) {
+        if (!(am & (KGUP | KGDN))) {
+          quant192_u8(w.xn, up[k]->s_act, w.q5);
+          qgemv_quant_bias(up[k]->m, w.q5, dn[k]->s_act, w.q64b);
+          qgemv_f32(dn[k]->m, w.q64b, go[k]);
+          continue;
+        }
+        float mult = 1.0f;
+        if (am & KGUP) {
+          quant(w.xn, up[k]->s_act, a16, D);
+          mult = K256;
+        } else {
+          quant192_u8(w.xn, up[k]->s_act, w.q5);
+          from_u8(w.q5, a16, D);
+        }
+        dense(up[k]->m, a16, mult, y64);
+        if (am & KGDN) {
+          quant(y64, dn[k]->s_act, g16, DH);
+          dense(dn[k]->m, g16, K256, go[k]);
+        } else {
+          quant_bias_u8(y64, dn[k]->s_act, w.q64b, DH);
+          qgemv_f32(dn[k]->m, w.q64b, go[k]);
+        }
+      }
+      for (int h = 0; h < NH; h++) w.braw[h] = dot192(w.xn, L.beta_w + size_t(h) * D);
+      kda_layer_step(L.kw, kst[ki], w.a, w.b, w.c, w.graw, w.og192, w.braw, w.gn);
+      if (am & KOP) {
+        quant(w.gn, L.op.s_act, a16, D);
+        dense(L.op.m, a16, K256, y);
+        for (int i = 0; i < D; i++) w.ar_f[i] += y[i];
+      } else {
+        quant192_u8(w.gn, L.op.s_act, w.q5);
+        qgemv_add(L.op.m, w.q5, w.ar_f);
+      }
+    }
+  }
+  // the window layer likewise; the per-head q/k/v codes behind RoPE stay int8
+  __attribute__((noinline)) void van_layer16(int vi, ZRow* r, int n, bool kv_only, int64_t t0) {
+    using namespace act16;
+    VanArenas& L = M.van[vi];
+    const int am = g_mask;
+    alignas(32) int16_t a16[D];
+    alignas(32) float y[D];
+    for (int j = 0; j < n; j++) {
+      ZRow& w = r[j];
+      rms_norm192(w.x, w.xn);
+      const QSite* const s3[3] = {&L.qp, &L.kp, &L.vp};
+      float* const o3[3] = {w.a, w.b, w.c};
+      for (int k = kv_only ? 1 : 0; k < 3; k++) {
+        if (am & VQKV) {
+          quant(w.xn, s3[k]->s_act, a16, D);
+          dense(s3[k]->m, a16, K256, o3[k]);
+        } else {
+          quant192_u8(w.xn, s3[k]->s_act, w.q5 + k * D);
+          qgemv_f32(s3[k]->m, w.q5 + k * D, o3[k]);
+        }
+      }
+      van_row(vi, w, t0 + j, kv_only);   // leaves the attention output in `pre`, its 8-bit code in w.q5
+      if (kv_only) continue;
+      if (am & VOP) {
+        quant(pre, L.op.s_act, a16, D);
+        dense(L.op.m, a16, K256, y);
+        for (int i = 0; i < D; i++) w.ar_f[i] += y[i];
+      } else {
+        qgemv_add(L.op.m, w.q5, w.ar_f);
+      }
+    }
+  }
+  // the MLP likewise.  The 8-bit relu^2 code (q768, idx768, nnz) is always
+  // written: the fast-weight head reads it, whatever the down matmul reads.
+  __attribute__((noinline)) void mlp_block16(int l, ZRow* r, int n) {
+    using namespace act16;
+    MlpArenas& mm = M.mlp[l];
+    const int am = g_mask;
+    const int rows = mm.up.m.rows_padded;
+    alignas(32) int16_t a16[D];
+    alignas(32) int16_t c16[DMLP];
+    alignas(64) float y[DMLP];
+    for (int j = 0; j < n; j++) {
+      ZRow& w = r[j];
+      float mult = 1.0f;
+      if (am & MLPUP) {
+        rms_norm192(w.x, w.xn);
+        quant(w.xn, mm.up.s_act, a16, D);
+        mult = K256;
+      } else {
+        rms_norm_quant192(w.x, w.xn, mm.up.s_act, w.q5);
+        from_u8(w.q5, a16, D);
+      }
+      dense(mm.up.m, a16, mult, y);
+      w.nnz = relu2_u8(y, mm.down_s_act, w.q768, w.idx768, rows);
+      if (am & MLPDN) {
+        relu2_16(y, mm.down_s_act, c16, rows);
+        sparse(mm.down, c16, mm.down.d_in, g_dn_mult, w.ar_f, true);
+        {   // for the time estimate: how many columns a sparse 16-bit kernel would visit
+          static unsigned long long s_calls, s_n8, s_n16, s_nhi;
+          int n16 = 0, nhi = 0;
+          for (int i = 0; i < rows; i++) {
+            n16 += c16[i] != 0;
+            nhi += c16[i] >= 256;
+          }
+          s_calls++;
+          s_n8 += static_cast<unsigned long long>(w.nnz);
+          s_n16 += static_cast<unsigned long long>(n16);
+          s_nhi += static_cast<unsigned long long>(nhi);
+          if ((s_calls & ((1ull << 22) - 1)) == 0)
+            std::fprintf(stderr, "neif_act16: mlp.down calls %llu, nonzero codes per call: 8-bit %.1f, 16-bit %.1f, 16-bit >= 256: %.1f\n",
+                         s_calls, double(s_n8) / double(s_calls), double(s_n16) / double(s_calls),
+                         double(s_nhi) / double(s_calls));
+        }
+      } else if (w.nnz > static_cast<int>(QMAT_SPARSE_DENSITY_THRESHOLD * mm.down.d_in)) {
+        qsparse4_dense_add(mm.down, w.q768, w.ar_f);
+      } else {
+        qsparse4_add(mm.down, w.q768, w.idx768, w.nnz, w.ar_f);
+      }
+    }
+    if (fw_gel && l >= NL - FWK) fw_apply(l - (NL - FWK), r->nnz, mm.down_s_act);
+  }
+  // NEIF_ACT16, fast path of mlpdn: the entry's mlp.up kernels up to the float
+  // row, then the wide relu^2 code and the two-plane sparse kernel
+  // (act16_test.h).  The 8-bit code is computed only where it is read: on a
+  // read row in the last FWK layers, for the fast-weight head.
+  __attribute__((noinline)) void mlp_block_fast(int l, ZRow* r, int n) {
+    using namespace act16;
+    MlpArenas& mm = M.mlp[l];
+    const int rows = mm.up.m.rows_padded;
+    const bool fw = fw_gel && l >= NL - FWK;
+    alignas(64) float y[ZB][DMLP];
+    alignas(32) uint16_t c[DMLP];
+    uint16_t il[DMLP + 32], ih[DMLP + 32];
+    {
+      PSCOPE(PS_EL_NQ_MLP);
+      for (int j = 0; j < n; j++) rms_norm_quant192(r[j].x, r[j].xn, mm.up.s_act, r[j].q5);
+    }
+    {
+      PSCOPE(PS_MM_MLP_UP);
+      if (n == 1)
+        qgemv_f32(mm.up.m, r->q5, y[0]);
+      else
+        qgemm(mm.up.m, r->q5, ZS, y[0], static_cast<ptrdiff_t>(sizeof(y[0])), n, false);
+    }
+    static unsigned long long s_calls, s_nl, s_nh;
+    for (int j = 0; j < n; j++) {
+      ZRow& w = r[j];
+      int nl, nh;
+      int32_t sum;
+      {
+        PSCOPE(PS_MM_MLP_UP);   // the quantizers belong to the up site, as in the entry's fused kernel
+        if (fw) w.nnz = relu2_u8_fast(y[j], mm.down_s_act, w.q768, w.idx768, rows);
+        relu2_wide(y[j], mm.down_s_act, rows, c, il, &nl, ih, &nh, &sum);
+      }
+      {
+        PSCOPE(PS_MM_MLP_DOWN);
+        sparse_fast(mm.down, c, il, nl, ih, nh, sum, w.ar_f);
+      }
+      s_nl += static_cast<unsigned long long>(nl);
+      s_nh += static_cast<unsigned long long>(nh);
+      if ((++s_calls & ((1ull << 22) - 1)) == 0)
+        std::fprintf(stderr, "neif_act16: mlp.down calls %llu, columns per call: low-byte plane %.1f, high-byte plane %.1f\n",
+                     s_calls, double(s_nl) / double(s_calls), double(s_nh) / double(s_calls));
+    }
+    if (fw) fw_apply(l - (NL - FWK), r->nnz, mm.down_s_act);
+  }
+#endif
+
   void kimi_layer(int ki, ZRow* r, int n) {
     KimiArenas& L = M.kimi[ki];
+#ifdef NEIF_TEST
+    if (!act16::g_fast && (act16::g_mask & (act16::KQKV | act16::KGUP | act16::KGDN | act16::KOP))) {
+      kimi_layer16(ki, r, n);
+      return;
+    }
+#endif
     {
       PSCOPE(PS_EL_NQ_KIMI);
       const float s5[5] = {L.qp.s_act, L.kp.s_act, L.vp.s_act, L.fg_up.s_act,
@@ -634,10 +854,32 @@ struct TransformerOptImpl : ZRow {
     }
     {
       PSCOPE(PS_KD_STEP);
+#if defined(NEIF_TEST) && defined(NEIF_MT)
+      // NEIF_MT: where the committed head states of this layer live once a
+      // speculative step was taken (kS_cur), and the shadow engine's step from
+      // the committed states into the other buffer, without moving the position
+      if (spec_mode) {
+        const float* in = sp_main->kS(ki);
+        float* out = in == &kst[ki].S[0][0] ? sp_main->kS_alt + static_cast<size_t>(ki) * kSN : &kst[ki].S[0][0];
+        sp_out[ki] = out;
+        kda_layer_step_io(L.kw, kst[ki], in, out, false, r->a, r->b, r->c, r->graw, r->og192, r->braw, r->gn);
+      } else if (kS_cur[ki]) {
+        for (int j = 0; j < n; j++)
+          kda_layer_step_io(L.kw, kst[ki], kS_cur[ki], kS_cur[ki], true, r[j].a, r[j].b, r[j].c, r[j].graw,
+                            r[j].og192, r[j].braw, r[j].gn);
+      } else
+#endif
       for (int j = 0; j < n; j++)   // the recurrence: rows in stream order
         kda_layer_step(L.kw, kst[ki], r[j].a, r[j].b, r[j].c, r[j].graw, r[j].og192, r[j].braw,
                        r[j].gn);
     }
+#ifdef NEIF_TEST
+    if (act16::g_fast & act16::KOP) {   // NEIF_ACT16: 16-bit code, fast kernel
+      PSCOPE(PS_MM_KOP);
+      for (int j = 0; j < n; j++) act16::op_fast(L.op.m, L.op.s_act, r[j].gn, r[j].ar_f);
+      return;
+    }
+#endif
     {
       PSCOPE(PS_EL_OQ);
       for (int j = 0; j < n; j++) quant192_u8(r[j].gn, L.op.s_act, r[j].q5);
@@ -653,6 +895,12 @@ struct TransformerOptImpl : ZRow {
   // (everything after the insert only feeds the output head).
   void van_layer(int vi, ZRow* r, int n, bool kv_only, int64_t t0) {
     VanArenas& L = M.van[vi];
+#ifdef NEIF_TEST
+    if (!act16::g_fast && (act16::g_mask & (act16::VQKV | act16::VOP))) {
+      van_layer16(vi, r, n, kv_only, t0);
+      return;
+    }
+#endif
     {
       PSCOPE(PS_EL_NQ_VAN);
       const float s3[3] = {L.qp.s_act, L.kp.s_act, L.vp.s_act};
@@ -667,6 +915,9 @@ struct TransformerOptImpl : ZRow {
     }
     for (int j = 0; j < n; j++)   // KV ring and window scan: rows in stream order
       van_row(vi, r[j], t0 + j, kv_only);
+#ifdef NEIF_TEST
+    if (act16::g_fast & act16::VOP) return;   // NEIF_ACT16: van_row has added the output projection
+#endif
     if (!kv_only) {
       PSCOPE(PS_MM_VOP);
       mm_add(L.op.m, r->q5, r->ar_f, n);
@@ -724,18 +975,123 @@ struct TransformerOptImpl : ZRow {
       }
       if (kv_only) return;
       PSCOPE(PS_AT_STEP);
+#if defined(NEIF_TEST) && defined(NEIF_MT)
+      // NEIF_MT: the window split over the threads of the pool (the same bytes in `pre`)
+      if (neif_mt::On() && nn >= 512)
+        attn_step_mt(kvi[vi], qq, L.coef, L.sv, static_cast<int>(nn < WIN ? nn : WIN), pre);
+      else
+#endif
       if (nn < WIN)
         attn_step_var(kvi[vi], qq, L.coef, L.sv, static_cast<int>(nn), pre, 0.0f);
       else
         attn_step_fixed(kvi[vi], qq, L.coef, L.sv, pre, 0.0f);
     }
+#ifdef NEIF_TEST
+    if (act16::g_fast & act16::VOP) {   // NEIF_ACT16: 16-bit code, fast kernel
+      PSCOPE(PS_MM_VOP);
+      act16::op_fast(L.op.m, L.op.s_act, pre, w.ar_f);
+      return;
+    }
+#endif
     PSCOPE(PS_EL_OQ);
     quant192_u8(pre, L.op.s_act, w.q5);
   }
 
+#if defined(NEIF_TEST) && defined(NEIF_MT)
+  // NEIF_MT (src/neif_mt.h): the MLP of one row as one region of the pool.
+  // Share s takes a range of the up projection's row groups: their dot
+  // products and relu^2 codes (written into the row's q768), the list of its
+  // non-zero codes, and the int32 sums of the down columns of those codes.
+  // The caller then adds the sums of the shares (integers: exact for any
+  // split), does the one float step of the down projection, and puts the
+  // lists one behind the other (the list qgemv_relu2q writes).
+  struct MtMlp {
+    const MlpArenas* mm;
+    ZRow* r;
+    float* y;
+    int nth;
+    struct alignas(64) Share {
+      int32_t acc[192];
+      int32_t corr;
+      int nnz;
+      uint16_t idx[DMLP + 64];
+    } sh[neif_mt::kMax];
+  };
+  static void mt_mlp_share(int s, void* a) {
+    MtMlp& j = *static_cast<MtMlp*>(a);
+    const QDense& up = j.mm->up.m;
+    const int ng = up.ngroups;
+    // borders at multiples of 8 groups (64 rows: whole cache lines of q768, whole 32-row blocks of the list)
+    const int g0 = (ng * s / j.nth) & ~7;
+    const int g1 = s + 1 == j.nth ? ng : (ng * (s + 1) / j.nth) & ~7;
+    MtMlp::Share& sh = j.sh[s];
+    sh.nnz = 0;
+    if (g1 > g0) {
+      qgemv_relu2q_part(up, j.r->q5, j.mm->down_s_act, j.r->q768, j.y, g0, g1);
+      sh.nnz = relu2q_idx_part(j.r->q768, 8 * g0, s + 1 == j.nth ? up.rows_padded : 8 * g1, sh.idx);
+    }
+    const uint16_t fill = sh.nnz ? sh.idx[sh.nnz - 1] : 0;   // behind the list: in-range entries for the prefetch
+    for (int k = sh.nnz; k < sh.nnz + 12; k++) sh.idx[k] = fill;
+    sh.corr = qsparse4_accum_part(j.mm->down, j.r->q768, sh.idx, sh.nnz, sh.acc);
+  }
+  void mlp_block_mt(int l, ZRow* r) {
+    MlpArenas& mm = M.mlp[l];
+    {
+      PSCOPE(PS_EL_NQ_MLP);
+      rms_norm_quant192(r->x, r->xn, mm.up.s_act, r->q5);
+    }
+    static MtMlp j;   // one MLP at a time
+    alignas(64) float y[DMLP];
+    {
+      PSCOPE(PS_MM_MLP_UP);
+      j.mm = &mm;
+      j.r = r;
+      j.y = y;
+      j.nth = neif_mt::g_n;
+      neif_mt::Run(mt_mlp_share, &j);
+    }
+    {
+      PSCOPE(PS_MM_MLP_DOWN);
+      alignas(64) int32_t acc[192];
+      int32_t corr = 0;
+      int nnz = 0;
+      std::memcpy(acc, j.sh[0].acc, sizeof acc);
+      for (int s = 0; s < j.nth; s++) {
+        if (s)
+          for (int i = 0; i < 192; i++) acc[i] += j.sh[s].acc[i];
+        corr += j.sh[s].corr;
+        std::memcpy(r->idx768 + nnz, j.sh[s].idx, sizeof(uint16_t) * static_cast<size_t>(j.sh[s].nnz));
+        nnz += j.sh[s].nnz;
+      }
+      r->nnz = nnz;
+      qsparse4_epi_add(mm.down, acc, corr, r->ar_f);
+    }
+    if (spec_mode && l >= NL - FWK) spec_save_fw(l, r);
+    if (fw_gel && l >= NL - FWK)
+      fw_apply(l - (NL - FWK), r->nnz, mm.down_s_act);
+  }
+#endif
+
   // the MLP of layer l for the rows r[0, n)
   void mlp_block(int l, ZRow* r, int n) {
     MlpArenas& mm = M.mlp[l];
+#ifdef NEIF_TEST
+#ifdef NEIF_MT
+    // NEIF_MT: one row, the entry's 8-bit path: the MLP on the pool
+    if (neif_mt::On() && n == 1 && !act16::g_fast && !(act16::g_mask & (act16::MLPUP | act16::MLPDN))) {
+      mlp_block_mt(l, r);
+      return;
+    }
+#endif
+    if (act16::g_fast & act16::MLPDN) {
+      mlp_block_fast(l, r, n);
+      return;
+    }
+    if (!act16::g_fast && (act16::g_mask & (act16::MLPUP | act16::MLPDN))) {
+      mlp_block16(l, r, n);
+      return;
+    }
+#endif
     {
       PSCOPE(PS_EL_NQ_MLP);
       for (int j = 0; j < n; j++) rms_norm_quant192(r[j].x, r[j].xn, mm.up.s_act, r[j].q5);
@@ -757,6 +1113,9 @@ struct TransformerOptImpl : ZRow {
           qsparse4_add(mm.down, w.q768, w.idx768, w.nnz, w.ar_f);
       }
     }
+#if defined(NEIF_TEST) && defined(NEIF_MT)
+    if (spec_mode && l >= NL - FWK) spec_save_fw(l, r);
+#endif
     // The relu^2 code of the last FWK MLPs, on read rows only (fw_gel; then
     // r is this object, n = 1, and fw_apply reads its q768 and idx768).
     if (fw_gel && l >= NL - FWK)
@@ -769,6 +1128,13 @@ struct TransformerOptImpl : ZRow {
     const float* tok_row = M.tok_table + size_t(r.tok) * D;
     if (M.paket.present) tok_row = paket_token_row(r.tok);
     int nnzp;
+#ifdef NEIF_TEST
+    if (act16::g_mask & act16::PRIOR) {   // NEIF_ACT16: 16-bit prior code
+      alignas(32) int16_t p16[208];
+      act16::quant(r.prior_f32, M.prior_s_act, p16, 208);
+      act16::sparse(M.prior, p16, V, act16::K256, yb, false);
+    } else {
+#endif
     {
       PSCOPE(PS_EL_PRIORQ);
       prior_quant_raw(r.prior_f32, M.prior_s_act, q8p);  // raw u8; q8p[208..224)=0
@@ -783,6 +1149,9 @@ struct TransformerOptImpl : ZRow {
       else
         qsparse4_f32(M.prior, q8p, idxp, nnzp, yb);
     }
+#ifdef NEIF_TEST
+    }
+#endif
     {
       PSCOPE(PS_EL_EMBED);
       embed_combine192(tok_row, yb, r.x);  // x0 = tok_row + rms_norm(prior_y)
@@ -802,6 +1171,9 @@ struct TransformerOptImpl : ZRow {
   __attribute__((noinline)) void zb_layers(ZRow* r, int n, bool kv_last, int l0, int l1,
                                            int64_t t0) {
     for (int l = l0; l < l1; l++) {
+#if defined(NEIF_TEST) && defined(NEIF_MT)
+      if (spec_mode && sp_main->sp_abort.load(std::memory_order_relaxed)) return;   // the guess is known to be wrong
+#endif
       {
         PSCOPE(PS_EL_RESID);
         for (int j = 0; j < n; j++) {
@@ -841,6 +1213,30 @@ struct TransformerOptImpl : ZRow {
     }
   }
 
+#ifdef NEIF_TEST
+  // All layers of the embedded rows r[0, n).  In a pipeline (src/neif_test.h)
+  // the network may be cut between two layers: the stage with the lower
+  // layers sends each row's depth-mix state (ArRow: all a later layer reads of
+  // the layers in front), the stage with the upper layers starts from it.
+  // Every layer does the same arithmetic on the same values as in one process.
+  __attribute__((noinline)) void zb_stage(ZRow* r, int n, bool kv_last) {
+    const bool lo = (neif_test::g_own & neif_test::kOwnTfLo) != 0;
+    const bool hi = (neif_test::g_own & neif_test::kOwnTfHi) != 0;
+    if (lo != hi) {
+      const size_t ar_bytes = (size_t)((const char*)(r->ar_f + D) - (const char*)r->ar_x0);
+      if (lo) {
+        zb_layers(r, n, kv_last, 0, neif_test::g_tf_split, t);
+        for (int j = 0; j < n; j++) neif_test::Put('A', r[j].ar_x0, ar_bytes);
+      } else {
+        for (int j = 0; j < n; j++) neif_test::Get('A', r[j].ar_x0, ar_bytes);
+        zb_layers(r, n, kv_last, neif_test::g_tf_split, NL, t);
+      }
+      return;
+    }
+    zb_layers(r, n, kv_last, 0, NL, t);
+  }
+#endif
+
   // The queue of unread rows (ZB rows): step() with an unread row only queues
   // it; the queue runs when the next read row arrives, at begin_article() or
   // when it is full.  What the rows leave (KV rings, KDA states, t) is written
@@ -867,12 +1263,19 @@ struct TransformerOptImpl : ZRow {
 #endif
     fw_gel = false;   // unread rows capture no MLP code
     const PaketChannels pk_keep = pk;   // paket_token_row() reads pk
+#ifdef NEIF_TEST
+    if (neif_test::g_own & neif_test::kOwnTfLo)   // pipeline: the embedding belongs to the lower layers
+#endif
     for (int j = 0; j < n; j++) {
       pk = zr[j].pk;
       zb_embed(zr[j]);
     }
     pk = pk_keep;
+#ifdef NEIF_TEST
+    zb_stage(zr, n, true);
+#else
     zb_layers(zr, n, true, 0, NL, t);
+#endif
     std::memcpy(xn, zr[n - 1].xn, sizeof(float) * D);
     t += n;
   }
@@ -952,6 +1355,10 @@ struct TransformerOptImpl : ZRow {
   // (xn, q5, logits, probs208, last_hidden()) stays untouched.
   __attribute__((noinline)) void fw_head() {
     for (int i = 0; i < D; i++) fw_x2[i] = x[i] + fw_dx[i];
+#ifdef NEIF_TEST
+    const bool a16 = (act16::g_mask & act16::FWUNEMB) != 0;   // NEIF_ACT16
+    if (a16) rms_norm192(fw_x2, fw_xn); else
+#endif
     rms_norm_quant192(fw_x2, fw_xn, M.unembed.s_act, fw_q);
     float sx = 0.0f, sn = 0.0f;
     for (int i = 0; i < D; i++) {
@@ -959,6 +1366,13 @@ struct TransformerOptImpl : ZRow {
       sn += fw_xn[i] * fw_xn[i];
     }
     fw_denom = sx > 0.0f ? std::sqrt(sn / sx) : 0.0f;
+#ifdef NEIF_TEST
+    if (a16) {
+      alignas(32) int16_t q16[D];
+      act16::quant(fw_xn, M.unembed.s_act, q16, D);
+      act16::dense(M.unembed.m, q16, act16::K256, fw_logits);
+    } else
+#endif
     qgemv_f32(M.unembed.m, fw_q, fw_logits);
     alignas(64) float raw[208];
     std::memcpy(raw, fw_logits, sizeof(raw));
@@ -1087,6 +1501,10 @@ struct TransformerOptImpl : ZRow {
                        const float* fold, float s_act, float* acc_out) {
     (void)d_in;
     alignas(32) int16_t qa[32];
+#ifdef NEIF_TEST
+    const bool a16 = (act16::g_mask & act16::PAKET) != 0;   // NEIF_ACT16: 16-bit code, fold / 256
+    if (a16) act16::quant(f, s_act, qa, 32); else
+#endif
     for (int i = 0; i < 32; i++) {
       float v = f[i] / s_act;   // as below: true division, clamp, round half to even
       if (v < -128.0f) v = -128.0f;
@@ -1108,7 +1526,13 @@ struct TransformerOptImpl : ZRow {
       const __m256i h4567 = _mm256_hadd_epi32(_mm256_hadd_epi32(r[4], r[5]), _mm256_hadd_epi32(r[6], r[7]));
       const __m256i s = _mm256_add_epi32(_mm256_permute2x128_si256(h0123, h4567, 0x20),
                                          _mm256_permute2x128_si256(h0123, h4567, 0x31));
+#ifdef NEIF_TEST
+      const __m256 t = _mm256_mul_ps(
+          a16 ? _mm256_mul_ps(_mm256_loadu_ps(fold + o), _mm256_set1_ps(act16::K256)) : _mm256_loadu_ps(fold + o),
+          _mm256_cvtepi32_ps(s));
+#else
       const __m256 t = _mm256_mul_ps(_mm256_loadu_ps(fold + o), _mm256_cvtepi32_ps(s));
+#endif
       _mm256_storeu_ps(acc_out + o, _mm256_add_ps(_mm256_loadu_ps(acc_out + o), t));
     }
   }
@@ -1166,6 +1590,114 @@ struct TransformerOptImpl : ZRow {
     return tok_paket;
   }
 
+#if defined(NEIF_TEST) && defined(NEIF_MT)
+  // ---- NEIF_MT: the speculative step (src/neif_mt.h, runs/neif-par/DESIGN.md 3.4) ----
+  // A second engine object, the shadow, runs one read row for a guessed token
+  // on the transformer thread while the main thread decodes the bits of that
+  // token.  It has its own row and scratch buffers, shares the weights and the
+  // K/V rings and the conv rings of the KDA layers, and writes the stepped KDA
+  // head states to a second buffer (kda_layer_step_io).  What it writes that
+  // is not its own: the K/V slot of position t, which holds position t - WIN
+  // and is rewritten by every step before it is read, and the conv ring slot
+  // of this step, likewise.  The fast weights are not touched: the
+  // shadow keeps the relu^2 codes of the last FWK MLPs, and the commit runs
+  // fw_apply and the second head on them, in the order of a real step.
+  // The real step() takes the shadow's result only if its own inputs (token,
+  // prior, channels, a read row, nothing in the row queue, the same position)
+  // are the ones the shadow ran on, bit for bit; otherwise it runs as always.
+  TransformerOptImpl* sp;         // main object: its shadow (null until the first speculation)
+  TransformerOptImpl* sp_main;    // shadow: the engine it speculates for
+  bool spec_mode;                 // this object is a shadow
+  bool sp_live;                   // main: a speculation was started and not yet looked at
+  // KDA head states: a speculative step reads the committed states of a
+  // layer and writes the stepped ones to the other of two buffers (the home
+  // buffer kst[ki].S and kS_alt); a commit makes that buffer the committed
+  // one.  The conv ring and the position stay in kst (shared).
+  static constexpr size_t kSN = 3 * 64 * 64;
+  float* kS_alt;                  // main: NKIMI x kSN floats
+  float* kS_cur[NKIMI];           // main: committed head states of layer ki (null: kst[ki].S)
+  float* sp_out[NKIMI];           // shadow: where its step put them
+  float* kS(int ki) { return kS_cur[ki] ? kS_cur[ki] : &kst[ki].S[0][0]; }
+  std::atomic<int> sp_abort;      // main: the running speculation is not wanted
+  uint64_t epoch;                 // main: counts every entry that changes the engine
+  struct SpRec {                  // main: the inputs of the finished speculative step
+    bool valid;
+    int token;
+    PaketChannels pk;
+    uint64_t epoch;
+    int64_t t;
+    uint16_t prior[208];
+  } sp_rec;
+  struct SpFw {                   // shadow: the relu^2 code of a fast-weight block
+    int nnz;
+    uint8_t q768[DMLP];
+    uint16_t idx768[DMLP + 16];
+  } sp_fw[FWK];
+  unsigned long long sp_hits, sp_miss, sp_runs;   // main: commits, speculations not used, speculative steps
+
+  void spec_save_fw(int l, const ZRow* r) {
+    SpFw& s = sp_fw[l - (NL - FWK)];
+    s.nnz = r->nnz;
+    std::memcpy(s.q768, r->q768, sizeof s.q768);
+    std::memcpy(s.idx768, r->idx768, sizeof(uint16_t) * static_cast<size_t>(r->nnz));
+  }
+  __attribute__((cold, noinline)) void spec_make() {
+    TransformerOptImpl* s = static_cast<TransformerOptImpl*>(MapNull(sizeof(TransformerOptImpl)));
+    // the weights: the same arenas (the model object holds pointers into them)
+    std::memcpy(static_cast<void*>(&s->M), static_cast<const void*>(&M), sizeof(OptModel));
+    s->kind = kind;
+    s->kvf = kvf;
+    s->kvi = kvi;
+    kS_alt = static_cast<float*>(MapNull(sizeof(float) * kSN * NKIMI));
+    s->kst = kst;   // the conv rings and positions are shared
+    s->spec_mode = true;
+    s->sp_main = this;
+    s->gelesen = true;
+    s->fw_gel = false;
+    sp = s;
+  }
+  // shadow: one read row for `token` (prior_f32, pk, t and rope_off are set)
+  void spec_step(uint8_t token) {
+    fw_gel = false;
+    tok = token;
+    zb_embed(*this);
+    zb_layers(this, 1, false, 0, NL, t);
+    if (sp_main->sp_abort.load(std::memory_order_relaxed)) return;
+    ar_read();
+    rms_norm_quant192(x, xn, M.unembed.s_act, q5);
+    std::memcpy(sc_key, sc_l2_stage, sizeof(float) * D);
+    qgemv_f32(M.unembed.m, q5, logits);
+    head_plm_softcap_softmax(logits, prior_f32, dot192(M.plm_w, xn), probs208);
+  }
+  // main: take the shadow's row as this step (prior_f32 and pk are set by the caller)
+  void spec_commit(float* probs_out) {
+    TransformerOptImpl& s = *sp;
+    tok = s.tok;
+    std::memcpy(x, s.x, sizeof x);
+    std::memcpy(xn, s.xn, sizeof xn);
+    std::memcpy(q5, s.q5, sizeof q5);
+    std::memcpy(sc_key, s.sc_key, sizeof sc_key);
+    std::memcpy(logits, s.logits, sizeof logits);
+    std::memcpy(probs208, s.probs208, sizeof probs208);
+    fw_gel = true;
+    for (int b = 0; b < FWK; b++) {   // the fast-weight forward of the last FWK MLPs, as mlp_block does it
+      const SpFw& f = s.sp_fw[b];
+      std::memcpy(q768, f.q768, sizeof f.q768);
+      std::memcpy(idx768, f.idx768, sizeof(uint16_t) * static_cast<size_t>(f.nnz));
+      nnz = f.nnz;
+      fw_apply(b, f.nnz, M.mlp[NL - FWK + b].down_s_act);
+    }
+    for (int ki = 0; ki < NKIMI; ki++) {   // the stepped head states become the committed ones
+      kS_cur[ki] = s.sp_out[ki];
+      kst[ki].pos++;
+    }
+    std::memcpy(probs_out, probs208, sizeof(float) * V);
+    fw_head();
+    t++;
+    epoch++;
+  }
+#endif
+
   // gelesen ("read"): the output of the next step() is used.  Applies to
   // that step only.  true from the ctor.
   bool gelesen;
@@ -1182,8 +1714,17 @@ struct TransformerOptImpl : ZRow {
     zb_run();
     fw_gel = true;
     tok = token;
+#ifdef NEIF_TEST
+    if (neif_test::g_own & neif_test::kOwnTfLo)   // pipeline: the embedding belongs to the lower layers
+#endif
     zb_embed(*this);
+#ifdef NEIF_TEST
+    zb_stage(this, 1, false);
+    // pipeline: the output heads belong to the stage with the upper layers
+    if (!(neif_test::g_own & neif_test::kOwnTfHi)) { t++; return; }
+#else
     zb_layers(this, 1, false, 0, NL, t);
+#endif
     {
       PSCOPE(PS_EL_RESID);
       ar_read();                                  // x = the final read (q 2 NL, M.ar_q_final)
@@ -1191,11 +1732,21 @@ struct TransformerOptImpl : ZRow {
 
     {
       PSCOPE(PS_EL_NQ_FIN);
+#ifdef NEIF_TEST
+      if (act16::g_mask & act16::UNEMB) rms_norm192(x, xn); else   // NEIF_ACT16
+#endif
       rms_norm_quant192(x, xn, M.unembed.s_act, q5);
     }
     std::memcpy(sc_key, sc_l2_stage, sizeof(float) * D);
     {
       PSCOPE(PS_MM_UNEMB);
+#ifdef NEIF_TEST
+      if (act16::g_mask & act16::UNEMB) {   // NEIF_ACT16
+        alignas(32) int16_t q16[D];
+        act16::quant(xn, M.unembed.s_act, q16, D);
+        act16::dense(M.unembed.m, q16, act16::K256, logits);
+      } else
+#endif
       qgemv_f32(M.unembed.m, q5, logits);  // rows_padded 208
     }
     {
@@ -1214,7 +1765,62 @@ COLD_SIZE_ATTR TransformerOpt::TransformerOpt(const char* weights_path, AttnKind
 
 COLD_SIZE_ATTR TransformerOpt::~TransformerOpt() = default;
 
+#if defined(NEIF_TEST) && defined(NEIF_MT)
+// NEIF_MT: before anything enters the engine on the main thread, a running
+// speculation is stopped and waited for; `keep` leaves its result for step()
+static void spec_join(TransformerOptImpl* m, bool keep) {
+  if (!m->sp_live) return;
+  if (!keep) m->sp_abort.store(1, std::memory_order_relaxed);
+  neif_mt::SpecWait();
+  m->sp_abort.store(0, std::memory_order_relaxed);
+  m->sp_live = false;
+  if (!keep) {
+    if (m->sp_rec.valid) ++m->sp_miss;
+    m->sp_rec.valid = false;
+  }
+}
+bool TransformerOpt::spec_ready() const {
+  return impl->zn == 0 && impl->kind == AttnKind::KVI8 && !act16::g_mask && !act16::g_fast;
+}
+void TransformerOpt::spec_mark() {
+  spec_join(impl.get(), false);   // an earlier speculation nobody looked at
+  impl->sp_live = true;
+}
+void TransformerOpt::spec_abort() { impl->sp_abort.store(1, std::memory_order_relaxed); }
+void TransformerOpt::spec_run(uint8_t token, const uint16_t* prior_f16, const PaketChannels& channels) {
+  TransformerOptImpl& m = *impl;
+  if (!m.sp) m.spec_make();
+  TransformerOptImpl& s = *m.sp;
+  m.sp_rec.valid = false;
+  ++m.sp_runs;
+  s.pk = channels;
+  prior_f16_to_f32(prior_f16, s.prior_f32);
+  s.t = m.t;
+  s.rope_off = m.rope_off;
+  s.spec_step(token);
+  if (m.sp_abort.load(std::memory_order_relaxed)) return;
+  m.sp_rec.token = token;
+  m.sp_rec.pk = channels;
+  m.sp_rec.epoch = m.epoch;
+  m.sp_rec.t = m.t;
+  std::memcpy(m.sp_rec.prior, prior_f16, sizeof m.sp_rec.prior);
+  m.sp_rec.valid = true;
+}
+void TransformerOpt::spec_stats(unsigned long long* v) const {
+  v[0] = impl->sp_runs;
+  v[1] = impl->sp_hits;
+  v[2] = impl->sp_miss;
+}
+#endif
+
 void TransformerOpt::begin_article(int64_t rope_position_offset) {
+#ifdef NEIF_TEST
+  if (!neif_test::OwnTf()) return;   // pipeline: the network lives in other stages
+#ifdef NEIF_MT
+  spec_join(impl.get(), false);
+  impl->epoch++;
+#endif
+#endif
   impl->begin(rope_position_offset);
 }
 
@@ -1233,6 +1839,29 @@ void TransformerOpt::step(uint8_t token, const float* prior205,
 
 void TransformerOpt::step(uint8_t token, const uint16_t* prior_f16,
                           float* probs_out, const PaketChannels& channels) {
+#if defined(NEIF_TEST) && defined(NEIF_MT)
+  // NEIF_MT: the row the shadow ran on?  Then its result is this step.
+  if (impl->sp_live) {
+    TransformerOptImpl& m = *impl;
+    const TransformerOptImpl::SpRec& r = m.sp_rec;
+    // a row that cannot match (unread, another token) stops the speculation at once
+    const bool may = m.gelesen && m.zn == 0;
+    spec_join(impl.get(), may);
+    if (may && r.valid && r.token == static_cast<int>(token) && r.epoch == m.epoch && r.t == m.t &&
+        r.pk.prev1 == channels.prev1 && r.pk.prev2 == channels.prev2 && r.pk.match_byte == channels.match_byte &&
+        r.pk.match_class == channels.match_class && std::memcmp(r.prior, prior_f16, sizeof r.prior) == 0) {
+      m.sp_rec.valid = false;
+      ++m.sp_hits;
+      m.pk = channels;
+      prior_f16_to_f32(prior_f16, m.prior_f32);
+      m.spec_commit(probs_out);
+      return;
+    }
+    if (r.valid) ++m.sp_miss;
+    m.sp_rec.valid = false;
+  }
+  impl->epoch++;
+#endif
   impl->pk = channels;
   prior_f16_to_f32(prior_f16, impl->prior_f32);  // exact; pads zeroed
   impl->step(token, probs_out);
@@ -1260,7 +1889,25 @@ const float* TransformerOpt::last_key() const { return impl->sc_key; }
 
 AttnKind TransformerOpt::attn_kind() const { return impl->kind; }
 
+#ifdef NEIF_TEST
+void TransformerOpt::fw_update(uint8_t target) {
+  // pipeline: the fast weights live in the stage with the upper layers
+  if (!(neif_test::g_own & neif_test::kOwnTfHi)) return;
+  impl->fw_update(target);
+}
+// Pipeline: what the coder side reads of the network between two driver steps
+// (hidden vector, cache key, second-head row), out of the engine or into it.
+void TransformerOpt::neif_state(float* buf, bool load) {
+  float* const part[3] = {impl->xn, impl->sc_key, impl->fw_probs208};
+  const int n[3] = {D, D, 208};
+  for (int i = 0; i < 3; buf += n[i], i++) {
+    if (load) std::memcpy(part[i], buf, sizeof(float) * n[i]);
+    else std::memcpy(buf, part[i], sizeof(float) * n[i]);
+  }
+}
+#else
 void TransformerOpt::fw_update(uint8_t target) { impl->fw_update(target); }
+#endif
 const float* TransformerOpt::fw_probs() const { return impl->fw_probs208; }
 
 }  // namespace opt

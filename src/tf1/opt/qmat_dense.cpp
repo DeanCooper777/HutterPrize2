@@ -87,10 +87,121 @@ struct EpiI32 {
 };
 
 // ---------------------------------------------------------------------------
+// Build flavours (NOT in the entry: without these macros nothing changes).
+//   NEIF_PFD=n     software-prefetch distance of the dense kernels in bytes
+//                  (the entry: 6144).  Changes speed only.
+//   NEIF_PACKED    nibble-packed dense arenas, 8-row groups:
+//                    [8 x int32 corr | 8 x fp32 scale | per 64 columns: 8 rows x 32 B]
+//                  byte i of a row vector = (w + 7) of column 64p + i in the low
+//                  nibble and of column 64p + 32 + i in the high nibble: half the
+//                  weight bytes per token of the unpacked arena.  The activation
+//                  stays the biased u8 of the entry, as the UNSIGNED operand of
+//                  vpmaddubsw; the nibbles 0..14 are the signed one:
+//                    sum_i act[i] * (w[i] + 7) = sum_i act[i] * w[i] + 7 * sum_i act[i]
+//                  so  dot = acc - 7 * sum(act bytes) - corr[row]  is the int32 dot
+//                  of the entry's kernel, exactly (corr as there: 128 * sum(w) for a
+//                  biased input).  int16 bound per lane: two products pairs per 64
+//                  columns, 2 * 2 * 255 * 14 = 14280, widened to int32 every 64
+//                  columns.  The epilogues are the entry's, so every float is the
+//                  same; compressor and decompressor of one build agree, and the
+//                  coder output equals the one of the unpacked kernels.
+// ---------------------------------------------------------------------------
+#ifdef NEIF_PFD
+constexpr int QPF_DIST = NEIF_PFD;
+#else
+constexpr int QPF_DIST = 6144;
+#endif
+
+#ifdef NEIF_PACKED
+// 7 * (sum of the n activation bytes), n a multiple of 32
+inline int32_t packed_act7(const uint8_t* act, int n) {
+  __m256i s = _mm256_setzero_si256();
+  for (int i = 0; i < n; i += 32)
+    s = _mm256_add_epi64(s, _mm256_sad_epu8(_mm256_load_si256(reinterpret_cast<const __m256i*>(act + i)),
+                                            _mm256_setzero_si256()));
+  const __m128i t = _mm_add_epi64(_mm256_castsi256_si128(s), _mm256_extracti128_si256(s, 1));
+  return 7 * static_cast<int32_t>(_mm_cvtsi128_si64(t) + _mm_extract_epi64(t, 1));
+}
+#define QP_STEP(r)                                                                              \
+  {                                                                                             \
+    const __m256i wv = _mm256_load_si256(wc + (r));                                             \
+    const __m256i t = _mm256_add_epi16(_mm256_maddubs_epi16(a0, _mm256_and_si256(wv, m0F)),     \
+                                       _mm256_maddubs_epi16(a1, _mm256_and_si256(_mm256_srli_epi16(wv, 4), m0F))); \
+    s##r = _mm256_add_epi32(s##r, _mm256_madd_epi16(t, ones));                                  \
+  }
+#define QP_GROUP()                                                                              \
+  __m256i s0 = _mm256_setzero_si256(), s1 = s0, s2 = s0, s3 = s0, s4 = s0, s5 = s0, s6 = s0, s7 = s0; \
+  for (int p = 0; p < NP; p++) {                                                                \
+    const __m256i* wc = w + p * 8;                                                              \
+    QP_PREFETCH()                                                                               \
+    const __m256i a0 = _mm256_load_si256(reinterpret_cast<const __m256i*>(act + 64 * p));       \
+    const __m256i a1 = _mm256_load_si256(reinterpret_cast<const __m256i*>(act + 64 * p + 32));  \
+    QP_STEP(0) QP_STEP(1) QP_STEP(2) QP_STEP(3) QP_STEP(4) QP_STEP(5) QP_STEP(6) QP_STEP(7)     \
+  }                                                                                             \
+  const __m256i q0 = _mm256_hadd_epi32(_mm256_hadd_epi32(s0, s1), _mm256_hadd_epi32(s2, s3));   \
+  const __m256i q1 = _mm256_hadd_epi32(_mm256_hadd_epi32(s4, s5), _mm256_hadd_epi32(s6, s7));   \
+  __m256i sums = _mm256_add_epi32(_mm256_permute2x128_si256(q0, q1, 0x20),                      \
+                                  _mm256_permute2x128_si256(q0, q1, 0x31));
+
+// the groups [g0, g1) for one activation row
+template <int NP, int PFN, class Epi>
+inline void run_p8(const QDense& m, const uint8_t* act, Epi& epi, int g0, int g1) {
+  const __m256i m0F = _mm256_set1_epi8(0x0F);
+  const __m256i ones = _mm256_set1_epi16(1);
+  const __m256i c7 = _mm256_set1_epi32(packed_act7(act, NP * 64));
+  constexpr ptrdiff_t GB = 64 + NP * 256;
+  const uint8_t* gp = m.arena + static_cast<ptrdiff_t>(g0) * GB;
+  for (int g = g0; g < g1; g++, gp += GB) {
+    const __m256i* w = reinterpret_cast<const __m256i*>(gp + 64);
+#define QP_PREFETCH()                                                                           \
+    for (int k = 0; k < PFN; k++)                                                               \
+      _mm_prefetch(reinterpret_cast<const char*>(gp) + p * 256 + QPF_DIST + 64 * k, _MM_HINT_T0);
+    QP_GROUP()
+#undef QP_PREFETCH
+    sums = _mm256_sub_epi32(_mm256_sub_epi32(sums, _mm256_load_si256(reinterpret_cast<const __m256i*>(gp))), c7);
+    epi(g, sums, reinterpret_cast<const float*>(gp + 32));
+  }
+}
+// n activation rows per group (the form of run_g8_n)
+template <int NP, int PFN, class Epi>
+inline void run_p8_n(const QDense& m, const uint8_t* act0, ptrdiff_t astr, int n, Epi& epi) {
+  const __m256i m0F = _mm256_set1_epi8(0x0F);
+  const __m256i ones = _mm256_set1_epi16(1);
+  int32_t c7[64];
+  if (n > 64) die("E195");
+  for (int j = 0; j < n; j++) c7[j] = packed_act7(act0 + j * astr, NP * 64);
+  constexpr ptrdiff_t GB = 64 + NP * 256;
+  const uint8_t* gp = m.arena;
+  const int ng = m.ngroups;
+  for (int g = 0; g < ng; g++, gp += GB) {
+    const __m256i* w = reinterpret_cast<const __m256i*>(gp + 64);
+    for (int k = 0; k < PFN * NP; k++)
+      _mm_prefetch(reinterpret_cast<const char*>(gp) + QPF_DIST + 64 * k, _MM_HINT_T0);
+    const __m256i corr = _mm256_load_si256(reinterpret_cast<const __m256i*>(gp));
+    const float* scl = reinterpret_cast<const float*>(gp + 32);
+    const uint8_t* act = act0;
+    for (int j = 0; j < n; j++, act += astr) {
+#define QP_PREFETCH()
+      QP_GROUP()
+#undef QP_PREFETCH
+      sums = _mm256_sub_epi32(_mm256_sub_epi32(sums, corr), _mm256_set1_epi32(c7[j]));
+      epi(g, j, sums, scl);
+    }
+  }
+}
+#undef QP_GROUP
+#undef QP_STEP
+#endif  // NEIF_PACKED
+
+// ---------------------------------------------------------------------------
 // core: 8-row groups, d_in <= 256 (NC chunks of 32 columns)
 // ---------------------------------------------------------------------------
 template <int NC, int PFN, class Epi>
 inline void run_g8(const QDense& m, const uint8_t* act, Epi& epi) {
+#ifdef NEIF_PACKED
+  run_p8<NC / 2, PFN, Epi>(m, act, epi, 0, m.ngroups);
+  return;
+#endif
   const __m256i ones = _mm256_set1_epi16(1);
   const uint8_t* gp = m.arena;
   constexpr ptrdiff_t GB = 64 + NC * 256;
@@ -107,7 +218,7 @@ inline void run_g8(const QDense& m, const uint8_t* act, Epi& epi) {
     __m256i s6 = _mm256_maddubs_epi16(av, w[6]);
     __m256i s7 = _mm256_maddubs_epi16(av, w[7]);
     for (int k = 0; k < PFN; k++)
-      _mm_prefetch(reinterpret_cast<const char*>(gp) + 6144 + 64 * k,
+      _mm_prefetch(reinterpret_cast<const char*>(gp) + QPF_DIST + 64 * k,
                    _MM_HINT_T0);
     // keep the chunk loop rolled: full unroll makes clang spill 3 of the 8
     // int16 accumulators (measured slower); the rolled body is load-balanced
@@ -119,7 +230,7 @@ inline void run_g8(const QDense& m, const uint8_t* act, Epi& epi) {
     for (int c = 1; c < NC; c++) {
       const __m256i* wc = w + c * 8;
       for (int k = 0; k < PFN; k++)
-        _mm_prefetch(reinterpret_cast<const char*>(gp) + c * 256 + 6144 +
+        _mm_prefetch(reinterpret_cast<const char*>(gp) + c * 256 + QPF_DIST +
                          64 * k,
                      _MM_HINT_T0);
       av = _mm256_load_si256(
@@ -272,6 +383,10 @@ inline void run_packed(const QPacked& m, const int8_t* act, int32_t corr7,
 template <int NC, int PFN, class Epi>
 inline void run_g8_n(const QDense& m, const uint8_t* act0, ptrdiff_t astr, int n,
                      Epi& epi) {
+#ifdef NEIF_PACKED
+  run_p8_n<NC / 2, PFN, Epi>(m, act0, astr, n, epi);
+  return;
+#endif
   const __m256i ones = _mm256_set1_epi16(1);
   const uint8_t* gp = m.arena;
   constexpr ptrdiff_t GB = 64 + NC * 256;
@@ -279,7 +394,7 @@ inline void run_g8_n(const QDense& m, const uint8_t* act0, ptrdiff_t astr, int n
   for (int g = 0; g < ng; g++, gp += GB) {
     const __m256i* w = reinterpret_cast<const __m256i*>(gp + 64);
     for (int k = 0; k < PFN * NC; k++)
-      _mm_prefetch(reinterpret_cast<const char*>(gp) + 6144 + 64 * k, _MM_HINT_T0);
+      _mm_prefetch(reinterpret_cast<const char*>(gp) + QPF_DIST + 64 * k, _MM_HINT_T0);
     const __m256i corr = _mm256_load_si256(reinterpret_cast<const __m256i*>(gp));
     const float* scl = reinterpret_cast<const float*>(gp + 32);
     const uint8_t* act = act0;
@@ -521,6 +636,101 @@ int qgemv_relu2q(const QDense& m, const uint8_t* act, float s_next,
   return nnz;
 }
 
+#if defined(NEIF_TEST) && defined(NEIF_MT)
+// NEIF_MT (src/neif_mt.h): qgemv_relu2q for a range of groups.  Every group
+// of 8 rows gets the instructions run_g8 and phase 2a give it there (integer
+// sums, then one multiply, relu, square, divide, round per row), so the range
+// form writes the same bytes for its rows as the whole kernel.
+namespace {
+template <int NC, int PFN, class Epi>
+inline void run_g8_range(const QDense& m, const uint8_t* act, Epi& epi, int g0, int g1) {
+#ifdef NEIF_PACKED
+  run_p8<NC / 2, PFN, Epi>(m, act, epi, g0, g1);
+  return;
+#endif
+  const __m256i ones = _mm256_set1_epi16(1);
+  constexpr ptrdiff_t GB = 64 + NC * 256;
+  const uint8_t* gp = m.arena + static_cast<ptrdiff_t>(g0) * GB;
+  for (int g = g0; g < g1; g++, gp += GB) {
+    const __m256i* w = reinterpret_cast<const __m256i*>(gp + 64);
+    __m256i av = _mm256_load_si256(reinterpret_cast<const __m256i*>(act));
+    __m256i s0 = _mm256_maddubs_epi16(av, w[0]);
+    __m256i s1 = _mm256_maddubs_epi16(av, w[1]);
+    __m256i s2 = _mm256_maddubs_epi16(av, w[2]);
+    __m256i s3 = _mm256_maddubs_epi16(av, w[3]);
+    __m256i s4 = _mm256_maddubs_epi16(av, w[4]);
+    __m256i s5 = _mm256_maddubs_epi16(av, w[5]);
+    __m256i s6 = _mm256_maddubs_epi16(av, w[6]);
+    __m256i s7 = _mm256_maddubs_epi16(av, w[7]);
+    for (int k = 0; k < PFN; k++)
+      _mm_prefetch(reinterpret_cast<const char*>(gp) + 6144 + 64 * k, _MM_HINT_T0);
+#pragma clang loop unroll(disable)
+    for (int c = 1; c < NC; c++) {
+      const __m256i* wc = w + c * 8;
+      for (int k = 0; k < PFN; k++)
+        _mm_prefetch(reinterpret_cast<const char*>(gp) + c * 256 + 6144 + 64 * k, _MM_HINT_T0);
+      av = _mm256_load_si256(reinterpret_cast<const __m256i*>(act + 32 * c));
+      s0 = _mm256_add_epi16(s0, _mm256_maddubs_epi16(av, wc[0]));
+      s1 = _mm256_add_epi16(s1, _mm256_maddubs_epi16(av, wc[1]));
+      s2 = _mm256_add_epi16(s2, _mm256_maddubs_epi16(av, wc[2]));
+      s3 = _mm256_add_epi16(s3, _mm256_maddubs_epi16(av, wc[3]));
+      s4 = _mm256_add_epi16(s4, _mm256_maddubs_epi16(av, wc[4]));
+      s5 = _mm256_add_epi16(s5, _mm256_maddubs_epi16(av, wc[5]));
+      s6 = _mm256_add_epi16(s6, _mm256_maddubs_epi16(av, wc[6]));
+      s7 = _mm256_add_epi16(s7, _mm256_maddubs_epi16(av, wc[7]));
+    }
+    __m256i p01 = _mm256_hadd_epi32(_mm256_madd_epi16(s0, ones), _mm256_madd_epi16(s1, ones));
+    __m256i p23 = _mm256_hadd_epi32(_mm256_madd_epi16(s2, ones), _mm256_madd_epi16(s3, ones));
+    __m256i p45 = _mm256_hadd_epi32(_mm256_madd_epi16(s4, ones), _mm256_madd_epi16(s5, ones));
+    __m256i p67 = _mm256_hadd_epi32(_mm256_madd_epi16(s6, ones), _mm256_madd_epi16(s7, ones));
+    __m256i q0 = _mm256_hadd_epi32(p01, p23);
+    __m256i q1 = _mm256_hadd_epi32(p45, p67);
+    __m256i sums = _mm256_add_epi32(_mm256_permute2x128_si256(q0, q1, 0x20),
+                                    _mm256_permute2x128_si256(q0, q1, 0x31));
+    sums = _mm256_sub_epi32(sums, _mm256_load_si256(reinterpret_cast<const __m256i*>(gp)));
+    epi(g, sums, reinterpret_cast<const float*>(gp + 32));
+  }
+}
+}  // namespace
+
+void qgemv_relu2q_part(const QDense& m, const uint8_t* act, float s_next,
+                       uint8_t* q_out, float* y, int g0, int g1) {
+  EpiF32 e{y};
+  run_g8_range<6, PFN_DEFAULT>(m, act, e, g0, g1);
+  const __m256 vs = _mm256_set1_ps(s_next);
+  const __m256 v127 = _mm256_set1_ps(127.0f);
+  const __m256 vz = _mm256_setzero_ps();
+  for (int g = g0; g < g1; g++) {   // one group at a time: the single-group form of qgemv_relu2q
+    __m256 yv = _mm256_max_ps(_mm256_load_ps(y + 8 * g), vz);
+    __m256 t = _mm256_div_ps(_mm256_mul_ps(yv, yv), vs);
+    __m256i q = _mm256_cvtps_epi32(_mm256_min_ps(t, v127));
+    __m128i q16 = _mm_packs_epi32(_mm256_castsi256_si128(q), _mm256_extracti128_si256(q, 1));
+    _mm_storel_epi64(reinterpret_cast<__m128i*>(q_out + 8 * g), _mm_packus_epi16(q16, q16));
+  }
+}
+
+int relu2q_idx_part(const uint8_t* q_out, int r0, int r1, uint16_t* idx) {
+  int nnz = 0;
+  int r = r0;
+  for (; r + 32 <= r1; r += 32) {
+    __m256i v = _mm256_loadu_si256(reinterpret_cast<const __m256i*>(q_out + r));
+    uint32_t mz = static_cast<uint32_t>(_mm256_movemask_epi8(
+        _mm256_cmpeq_epi8(v, _mm256_setzero_si256())));
+    uint32_t mk = ~mz;
+    for (int k = 0; k < 4; k++) {
+      const uint32_t m8 = (mk >> (8 * k)) & 0xFF;
+      __m128i lut = _mm_loadl_epi64(reinterpret_cast<const __m128i*>(g_bitpos.t[m8]));
+      __m128i i16 = _mm_add_epi16(_mm_cvtepu8_epi16(lut), _mm_set1_epi16(static_cast<short>(r + 8 * k)));
+      _mm_storeu_si128(reinterpret_cast<__m128i*>(idx + nnz), i16);
+      nnz += __builtin_popcount(m8);
+    }
+  }
+  for (; r < r1; r++)
+    if (q_out[r]) idx[nnz++] = static_cast<uint16_t>(r);
+  return nnz;
+}
+#endif
+
 void qgemv_quant_bias(const QDense& m, const uint8_t* act, float s_next,
                       uint8_t* q_out) {
   if (m.d_in != 192) die("E198");
@@ -614,6 +824,10 @@ void qgemv_packed_i32(const QPacked& m, const int8_t* act, int32_t corr7,
 // builders
 // ---------------------------------------------------------------------------
 COLD_SIZE_ATTR size_t qdense_bytes(int d_out, int d_in) {
+#ifdef NEIF_PACKED
+  if (d_in > 256) die("E195");
+  return static_cast<size_t>(qmat_round_up(d_out, 8) / 8) * (64 + static_cast<size_t>(qmat_round_up(d_in, 64)) * 4);
+#endif
   const int gr = qmat_group_rows(d_in);
   const int stride = qmat_round_up(d_in, 32);
   const int ng = qmat_round_up(d_out, gr) / gr;
@@ -634,6 +848,34 @@ COLD_SIZE_ATTR QDense qdense_build(uint8_t* dst, const int8_t* qw, const float* 
   m.rows_padded = qmat_round_up(d_out, m.group_rows);
   m.ngroups = m.rows_padded / m.group_rows;
   m.bytes = qdense_bytes(d_out, d_in);
+#ifdef NEIF_PACKED
+  {
+    const int np = qmat_round_up(d_in, 64) / 64;
+    const size_t gbp = 64 + static_cast<size_t>(np) * 256;
+    auto wq = [&](int row, int col) -> int {   // pad rows and columns: weight 0
+      return (row < d_out && col < d_in) ? qw[static_cast<size_t>(row) * d_in + col] : 0;
+    };
+    for (int g = 0; g < m.ngroups; g++) {
+      uint8_t* gp = dst + g * gbp;
+      int32_t* corr = reinterpret_cast<int32_t*>(gp);
+      float* scl = reinterpret_cast<float*>(gp + 32);
+      for (int r = 0; r < 8; r++) {
+        const int row = g * 8 + r;
+        int32_t sum = 0;
+        if (biased_input)
+          for (int i = 0; i < d_in; i++) sum += wq(row, i);
+        corr[r] = 128 * sum;
+        scl[r] = row < d_out ? fold[row] : 0.0f;
+      }
+      uint8_t* w = gp + 64;
+      for (int p = 0; p < np; p++)
+        for (int r = 0; r < 8; r++)
+          for (int j = 0; j < 32; j++)
+            *w++ = static_cast<uint8_t>(((wq(g * 8 + r, 64 * p + 32 + j) + 7) << 4) | (wq(g * 8 + r, 64 * p + j) + 7));
+    }
+    return m;
+  }
+#endif
   const int G = m.group_rows;
   const size_t meta = G == 8 ? 64 : 32;
   const size_t gb = meta + static_cast<size_t>(m.stride) * G;

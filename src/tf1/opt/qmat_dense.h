@@ -36,6 +36,19 @@ void qgemv_add(const QDense& m, const uint8_t* act, float* out);
 //     quantize_i8(h, s_next) reinterpreted as u8.
 int qgemv_relu2q(const QDense& m, const uint8_t* act, float s_next,
                  uint8_t* q_out, uint16_t* idx_out);
+#if defined(NEIF_TEST) && defined(NEIF_MT)
+// NEIF_MT (src/neif_mt.h): the parts of qgemv_relu2q for one thread.
+// qgemv_relu2q_part: the groups [g0, g1) of 8 rows: y[8 g0 .. 8 g1) and
+// q_out[8 g0 .. 8 g1), with the instructions of qgemv_relu2q per group.
+// relu2q_idx_part: the ascending list of the rows r in [r0, r1) with
+// q_out[r] != 0 (r0 a multiple of 32; a tail of r1 that is no multiple of 32
+// is scanned row by row, as qgemv_relu2q does at rows_padded); idx needs
+// (r1 - r0) + 8 entries.  The lists of consecutive ranges, one behind the
+// other, are the list qgemv_relu2q writes.
+void qgemv_relu2q_part(const QDense& m, const uint8_t* act, float s_next,
+                       uint8_t* q_out, float* y, int g0, int g1);
+int relu2q_idx_part(const uint8_t* q_out, int r0, int r1, uint16_t* idx);
+#endif
 
 // (d) low-rank gate chain epilogue (d_in must be 192; d_out 64):
 //       y = float(dot[r]) * scale[r]

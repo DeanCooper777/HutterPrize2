@@ -479,6 +479,16 @@ void qsparse4_dense_i32(const QSparse4& m, const uint8_t* q8, int32_t* out) {
   for (int r = 0; r < 192; r++) out[r] = acc[r] - corr;
 }
 
+#if defined(NEIF_TEST) && defined(NEIF_MT)
+// NEIF_MT (src/neif_mt.h): the two steps of qsparse4_add, see qmat_sparse.h
+int32_t qsparse4_accum_part(const QSparse4& m, const uint8_t* q8, const uint16_t* idx, int nnz, int32_t* acc) {
+  return sparse4_accum<true>(m.cols, q8, idx, nnz, acc);
+}
+void qsparse4_epi_add(const QSparse4& m, const int32_t* acc, int32_t corr, float* out) {
+  epi4_add(acc, corr, m.fold, out);
+}
+#endif
+
 int qsparse_make_idx(const uint8_t* q8, int n, uint16_t* idx) {
   int nnz = 0;
   const int nblk = (n + 31) / 32;

@@ -19,6 +19,15 @@ class Match : public Model {
   void ByteUpdate();
   unsigned char MatchByte() const { return cur_byte_; }
   unsigned char MatchLength() const { return match_length_; }
+#if defined(NEIF_TEST) && defined(NEIF_MT)
+  // NEIF_MT (src/neif_mt.h): MatchByte() and MatchLength() as they will stand
+  // behind the byte g, i.e. after its eight Perceive() calls, the update of
+  // the context (a ContextHash of this order and hash width) and ByteUpdate().
+  // To be called at the start of the byte, before its first bit; writes
+  // nothing.  mgr_hist_pos: the history position the byte will be written to.
+  void Peek(int g, unsigned int order, unsigned int hash_bits, unsigned long long mgr_hist_pos,
+            unsigned char* byte, unsigned char* len) const;
+#endif
 
  private:
   const std::vector<unsigned char>& history_;

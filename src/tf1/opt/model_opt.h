@@ -99,6 +99,28 @@ struct TransformerOpt {
   // the V second-head probabilities of the last read row (valid until the
   // next read row)
   const float* fw_probs() const;
+#if defined(NEIF_TEST) && defined(NEIF_MT)
+  // NEIF_MT (src/neif_mt.h): the speculative step.  spec_ready(): a read row
+  // could be the next thing the engine runs (nothing waits in the row queue).
+  // spec_mark() (main thread, before the job is posted): a speculation is on
+  // its way.  spec_run() (transformer thread): one read row for a guessed
+  // token on the shadow engine; nothing the main thread reads is written.
+  // The four-argument step() takes its result if it was called with the same
+  // inputs, and runs the row itself otherwise.  spec_abort(): the guess is
+  // known to be wrong, the shadow may stop.  spec_stats: speculative steps,
+  // of them taken, not taken.
+  bool spec_ready() const;
+  void spec_mark();
+  void spec_run(uint8_t token, const uint16_t* prior_f16, const PaketChannels& channels);
+  void spec_abort();
+  void spec_stats(unsigned long long* v) const;
+#endif
+#ifdef NEIF_TEST
+  // pipeline (src/neif_test.h): last_hidden(), last_key() and fw_probs() as
+  // one block of kNeifState floats, copied out (load = false) or in
+  static constexpr int kNeifState = 2 * 192 + 208;
+  void neif_state(float* buf, bool load);
+#endif
 
  private:
   std::unique_ptr<TransformerOptImpl> impl;

@@ -17,6 +17,9 @@
 #include "../ppmd_order_table.h"
 
 #include "../ppmd_prewarm.h"
+#ifdef NEIF_TEST
+#include "../neif_test.h"   // chunk evaluation: pipeline stages
+#endif
 
 #include <cstring>
 #include <malloc.h>
@@ -1551,6 +1554,11 @@ void processSymbol2_T( CTX_PARAM(q), int ) {
   }
 
 void ppmd_PrepareByte( void ) {
+#ifdef NEIF_TEST
+    // pipeline: a stage without the PPMd model takes the result of this byte
+    // (sqp, trF, trT) from the queue; PPMD::ByteUpdate() goes on from there
+    if( !neif_test::OwnPpmd() ) { neif_test::PpmdGet( sqp, trF, trT ); return; }
+#endif
     ppmd_page::dyn_tick();
     if( ppmd_page::V.z_versatz | ppmd_page::V.z_basis ) {
       const unsigned long long g = ppmd_page::V.z_grenze << 12;
@@ -1584,6 +1592,9 @@ void ppmd_PrepareByte( void ) {
 }
 
 void ppmd_UpdateByte( uint c ) {
+#ifdef NEIF_TEST
+  if( !neif_test::OwnPpmd() ) return;   // pipeline: the model lives in another stage
+#endif
   const int lt_f0 = OrderFall;
   pPPMC  MinContext = MaxContext;
   if( MinContext->NumStats ) {
@@ -1657,6 +1668,27 @@ __attribute__((cold)) PPMD::~PPMD() {
 }
 
 __attribute__((noinline, cold)) void PPMD::Waermen() { ppmd_model_->DictcodeFutter( 2 ); }
+#ifdef NEIF_TEST
+// Chunk evaluation: the two restarts ByteUpdate() takes at the next model byte
+// once their latch is set (each runs once; both are no-ops otherwise).
+void PPMD::NeifSync() {
+  ppmd_model_->MetaSchnitt(counter_);
+  ppmd_model_->ZeileSchnitt();
+}
+// Pipeline, behind ByteUpdate(): the result of this byte goes to the next
+// stage, or is compared with the one that came from the stage in front.
+// Pipeline, right after the fork in a stage without the PPMd model: the two
+// restarts of ByteUpdate() count as taken, so no latch (the metadata block
+// reader and the runner set them in every stage) starts the model here; its
+// heap is shared memory and belongs to the stage that runs it.
+void PPMD::NeifDisown() {
+  ppmd_model_->MetaGetan = true;
+  ppmd_model_->ZeileGetan = true;
+}
+void PPMD::NeifRow() {
+  neif_test::PpmdRow(ppmd_model_->sqp, ppmd_model_->trF, ppmd_model_->trT, &probs_[0]);
+}
+#endif
 
 std::valarray<float>& PPMD::Predict() {
   const unsigned int total = tree_total_[tree_context_];
@@ -1706,5 +1738,44 @@ void PPMD::ByteUpdate() {
   probs_ /= probs_.sum();
   tree_context_ = 1;
 }
+
+#if defined(NEIF_TEST) && defined(NEIF_MT)
+// NEIF_MT (ppmd.h): speculative update of the model.
+static void* neif_spec_snap = nullptr;              // the model object before the speculative update
+static unsigned long long neif_spec_counter = 0;
+__attribute__((cold)) PPMD::PPMD(const PPMD& real, const unsigned int& byte, Shadow)
+    : ByteModel(real.vocab_), byte_(byte) {
+  tree_zero_.fill(0);
+  tree_total_.fill(0);
+  disabled_bytes_ = real.disabled_bytes_;
+  vocab_full_ = real.vocab_full_;
+  ppmd_model_.reset(real.ppmd_model_.get());   // not owned: a shadow is never destroyed
+}
+bool PPMD::SpecSafe() const {
+  const ppmd_Model& m = *ppmd_model_;
+  return !((!m.MetaGetan && ppmd_meta::block_fertig) || (!m.ZeileGetan && ppmd_meta::zeile_fertig));
+}
+void PPMD::SpecBegin() {
+  if (!neif_spec_snap) neif_spec_snap = malloc(sizeof(ppmd_Model));
+  memcpy(neif_spec_snap, static_cast<const void*>(ppmd_model_.get()), sizeof(ppmd_Model));
+  neif_spec_counter = counter_;
+  ppmd_page::jn_begin();
+}
+void PPMD::SpecEnd() { ppmd_page::jn_stop(); }
+void PPMD::SpecKeep() { ppmd_page::jn_keep(); }
+void PPMD::SpecUndo() {
+  ppmd_page::jn_undo();
+  memcpy(static_cast<void*>(ppmd_model_.get()), neif_spec_snap, sizeof(ppmd_Model));
+  counter_ = neif_spec_counter;
+}
+void PPMD::SpecAdopt(const PPMD& sh) {
+  tree_zero_ = sh.tree_zero_;
+  tree_total_ = sh.tree_total_;
+  tree_context_ = sh.tree_context_;
+  probs_ = sh.probs_;
+  top_ = sh.top_;
+  bot_ = sh.bot_;
+}
+#endif
 
 } // namespace PPMD
