@@ -1,0 +1,6 @@
+utc	config	runs	processes_per_run	cpu_sets	stream_bytes_per_s_total	model_s_min	model_s_max	peak_pss_kb_sum	all_ok
+2026-11-18T02:36:20Z	16:3:32	16	32	oversubscribed	64027.0	143.0	155.9	145339029	yes
+2026-11-18T02:40:48Z	16:3:2	16	2	SMT siblings shared	56152.8	155.0	190.7	146153912	yes
+2026-11-18T02:45:39Z	16:2	16	2	SMT siblings shared	47129.0	188.9	210.2	142163603	yes
+2026-11-18T02:49:14Z	8:3:32	8	32	oversubscribed	38902.4	114.8	132.8	72432100	yes
+2026-11-18T02:52:33Z	8:3:4	8	4	SMT siblings shared	42754.7	102.8	121.1	72702670	yes

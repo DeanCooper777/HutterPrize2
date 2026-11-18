@@ -1,0 +1,322 @@
+{
+ "K": 16,
+ "splits_done": [
+  0,
+  1,
+  2,
+  3,
+  4,
+  5,
+  6,
+  7,
+  8,
+  9,
+  10,
+  11,
+  12,
+  13,
+  14,
+  15
+ ],
+ "splits_missing": [],
+ "total_kept_bytes": 88132116.419,
+ "stream_bytes": 501062281,
+ "compress_max_split_hours": 3.654638888888889,
+ "compress_cpu_hours": 99.25927777777778,
+ "pipe": 3,
+ "max_peak_gib": 10.519475936889648,
+ "decodes": [
+  {
+   "k": 0,
+   "mode": "verify",
+   "passed": true,
+   "decoded_bytes": 31316392,
+   "seconds": 10520.3,
+   "peak_gib": 10.550016403198242
+  },
+  {
+   "k": 1,
+   "mode": "verify",
+   "passed": true,
+   "decoded_bytes": 35316171,
+   "seconds": 12278.9,
+   "peak_gib": 10.264202117919922
+  },
+  {
+   "k": 2,
+   "mode": "verify",
+   "passed": true,
+   "decoded_bytes": 35314029,
+   "seconds": 12555.8,
+   "peak_gib": 10.287683486938477
+  },
+  {
+   "k": 3,
+   "mode": "verify",
+   "passed": true,
+   "decoded_bytes": 35313982,
+   "seconds": 12708.8,
+   "peak_gib": 10.24476432800293
+  },
+  {
+   "k": 4,
+   "mode": "verify",
+   "passed": true,
+   "decoded_bytes": 35314267,
+   "seconds": 12803.3,
+   "peak_gib": 10.34577465057373
+  },
+  {
+   "k": 5,
+   "mode": "verify",
+   "passed": true,
+   "decoded_bytes": 35314181,
+   "seconds": 12450.8,
+   "peak_gib": 10.323060035705566
+  },
+  {
+   "k": 6,
+   "mode": "verify",
+   "passed": true,
+   "decoded_bytes": 35315524,
+   "seconds": 12504.9,
+   "peak_gib": 10.320538520812988
+  },
+  {
+   "k": 7,
+   "mode": "verify",
+   "passed": true,
+   "decoded_bytes": 35297118,
+   "seconds": 12809.0,
+   "peak_gib": 9.874051094055176
+  },
+  {
+   "k": 8,
+   "mode": "verify",
+   "passed": true,
+   "decoded_bytes": 35314777,
+   "seconds": 13080.0,
+   "peak_gib": 9.707972526550293
+  },
+  {
+   "k": 9,
+   "mode": "verify",
+   "passed": true,
+   "decoded_bytes": 35305471,
+   "seconds": 12834.0,
+   "peak_gib": 10.344404220581055
+  },
+  {
+   "k": 10,
+   "mode": "verify",
+   "passed": true,
+   "decoded_bytes": 35313834,
+   "seconds": 13064.5,
+   "peak_gib": 10.357016563415527
+  },
+  {
+   "k": 11,
+   "mode": "verify",
+   "passed": true,
+   "decoded_bytes": 35299683,
+   "seconds": 13954.8,
+   "peak_gib": 10.350433349609375
+  },
+  {
+   "k": 12,
+   "mode": "verify",
+   "passed": true,
+   "decoded_bytes": 35310263,
+   "seconds": 13553.3,
+   "peak_gib": 9.676824569702148
+  },
+  {
+   "k": 13,
+   "mode": "verify",
+   "passed": true,
+   "decoded_bytes": 35310898,
+   "seconds": 13535.5,
+   "peak_gib": 10.37836742401123
+  },
+  {
+   "k": 14,
+   "mode": "verify",
+   "passed": true,
+   "decoded_bytes": 35311627,
+   "seconds": 15224.8,
+   "peak_gib": 9.638733863830566
+  },
+  {
+   "k": 15,
+   "mode": "verify",
+   "passed": true,
+   "decoded_bytes": 35316358,
+   "seconds": 14910.5,
+   "peak_gib": 10.289605140686035
+  }
+ ],
+ "decodes_all_pass": true,
+ "decode_max_split_hours": 4.229111111111111,
+ "splits": [
+  {
+   "k": 0,
+   "start": 0,
+   "end": 31316392,
+   "warm_from": 0,
+   "kept_bytes": 5177397.763,
+   "bits_per_byte": 1.3226,
+   "seconds": 9782.9,
+   "peak_gib": 10.519475936889648
+  },
+  {
+   "k": 1,
+   "start": 31316392,
+   "end": 62632785,
+   "warm_from": 27316614,
+   "kept_bytes": 5456562.913,
+   "bits_per_byte": 1.39392,
+   "seconds": 11656.6,
+   "peak_gib": 9.70859146118164
+  },
+  {
+   "k": 2,
+   "start": 62632785,
+   "end": 93949177,
+   "warm_from": 58635148,
+   "kept_bytes": 6118760.708,
+   "bits_per_byte": 1.56308,
+   "seconds": 11472.1,
+   "peak_gib": 10.289953231811523
+  },
+  {
+   "k": 3,
+   "start": 93949177,
+   "end": 125265570,
+   "warm_from": 89951588,
+   "kept_bytes": 5765819.715,
+   "bits_per_byte": 1.47292,
+   "seconds": 11641.2,
+   "peak_gib": 10.262307167053223
+  },
+  {
+   "k": 4,
+   "start": 125265570,
+   "end": 156581962,
+   "warm_from": 121267695,
+   "kept_bytes": 6141387.946,
+   "bits_per_byte": 1.56886,
+   "seconds": 11656.8,
+   "peak_gib": 10.311306953430176
+  },
+  {
+   "k": 5,
+   "start": 156581962,
+   "end": 187898355,
+   "warm_from": 152584174,
+   "kept_bytes": 5655862.304,
+   "bits_per_byte": 1.44483,
+   "seconds": 11752.3,
+   "peak_gib": 10.357234001159668
+  },
+  {
+   "k": 6,
+   "start": 187898355,
+   "end": 219214747,
+   "warm_from": 183899223,
+   "kept_bytes": 6134720.695,
+   "bits_per_byte": 1.56716,
+   "seconds": 11680.4,
+   "peak_gib": 10.359076499938965
+  },
+  {
+   "k": 7,
+   "start": 219214747,
+   "end": 250531140,
+   "warm_from": 215234022,
+   "kept_bytes": 6425342.933,
+   "bits_per_byte": 1.6414,
+   "seconds": 11991.7,
+   "peak_gib": 10.283267974853516
+  },
+  {
+   "k": 8,
+   "start": 250531140,
+   "end": 281847533,
+   "warm_from": 246532756,
+   "kept_bytes": 6271186.749,
+   "bits_per_byte": 1.60202,
+   "seconds": 12017.2,
+   "peak_gib": 10.33314037322998
+  },
+  {
+   "k": 9,
+   "start": 281847533,
+   "end": 313163925,
+   "warm_from": 277858454,
+   "kept_bytes": 4837234.282,
+   "bits_per_byte": 1.23571,
+   "seconds": 11484.0,
+   "peak_gib": 10.344636917114258
+  },
+  {
+   "k": 10,
+   "start": 313163925,
+   "end": 344480318,
+   "warm_from": 309166484,
+   "kept_bytes": 5654665.414,
+   "bits_per_byte": 1.44453,
+   "seconds": 12160.2,
+   "peak_gib": 10.217035293579102
+  },
+  {
+   "k": 11,
+   "start": 344480318,
+   "end": 375796710,
+   "warm_from": 340497027,
+   "kept_bytes": 5329829.573,
+   "bits_per_byte": 1.36154,
+   "seconds": 12108.3,
+   "peak_gib": 10.350292205810547
+  },
+  {
+   "k": 12,
+   "start": 375796710,
+   "end": 407113103,
+   "warm_from": 371802840,
+   "kept_bytes": 5355148.045,
+   "bits_per_byte": 1.36801,
+   "seconds": 12174.7,
+   "peak_gib": 10.320366859436035
+  },
+  {
+   "k": 13,
+   "start": 407113103,
+   "end": 438429495,
+   "warm_from": 403118597,
+   "kept_bytes": 5142562.722,
+   "bits_per_byte": 1.31371,
+   "seconds": 11946.6,
+   "peak_gib": 10.24356460571289
+  },
+  {
+   "k": 14,
+   "start": 438429495,
+   "end": 469745888,
+   "warm_from": 434434261,
+   "kept_bytes": 4431651.266,
+   "bits_per_byte": 1.1321,
+   "seconds": 12530.4,
+   "peak_gib": 10.114238739013672
+  },
+  {
+   "k": 15,
+   "start": 469745888,
+   "end": 501062281,
+   "warm_from": 465745923,
+   "kept_bytes": 4233983.391,
+   "bits_per_byte": 1.0816,
+   "seconds": 13156.7,
+   "peak_gib": 10.162436485290527
+  }
+ ]
+}

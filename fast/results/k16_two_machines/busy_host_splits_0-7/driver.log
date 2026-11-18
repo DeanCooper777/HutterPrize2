@@ -1,0 +1,9 @@
+2026-11-18T10:53:35Z hostA waiting 145 s for the start at 10:56 UTC
+2026-11-18T10:56:00Z hostA driver start; cpu sets: cpu sets: 8 x 4 on 16 cores / 32 logical CPUs: SMT siblings shared 5,101,50,146 52,148,55,151 10,106,15,111 33,129,58,154 61,157,62,158 20,116,23,119 90,186,44,140 45,141,47,143 
+2026-11-18T10:56:00Z hostA host: loadavg 100.81 104.73 106.49, cmix processes already running: 0
+2026-11-18T10:56:00Z hostA PASS1_compress START splits 0-7, 8 at once, 4 CPUs each
+2026-11-18T14:20:05Z hostA PASS1_compress END exit 0 wall_s 12245
+2026-11-18T14:20:05Z hostA PASS2_verify START splits 0-7, 8 at once, 4 CPUs each
+2026-11-18T18:03:18Z hostA PASS2_verify END exit 0 wall_s 13393
+2026-11-18T18:03:18Z hostA summary (this machine's splits only): out/k16x2: 8 of 16 splits; kept 46,875,855.0 bytes over 250,531,140 stream bytes; compress: longest split 3.400 h, 51.16 core-hours, peak memory per split up to 10.47 GiB   splits without a result: [8, 9, 10, 11, 12, 13, 14, 15]   decodes: 8 of 8 PASS (verify), longest 3.720 h 
+2026-11-18T18:03:18Z hostA ALL DONE

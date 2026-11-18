@@ -1,0 +1,19 @@
+2026-11-18T02:55:42Z phase 2 driver start; host load before launch (2 min, every 10 s; busy = share of all host CPUs)
+  02:55:52 loadavg 56.33 host busy 0.287
+  02:56:02 loadavg 56.92 host busy 0.279
+  02:56:12 loadavg 56.23 host busy 0.281
+  02:56:22 loadavg 56.57 host busy 0.284
+  02:56:32 loadavg 56.99 host busy 0.290
+  02:56:42 loadavg 57.60 host busy 0.283
+  02:56:52 loadavg 57.12 host busy 0.274
+  02:57:02 loadavg 57.12 host busy 0.275
+  02:57:12 loadavg 57.04 host busy 0.278
+  02:57:22 loadavg 57.26 host busy 0.287
+  02:57:32 loadavg 56.97 host busy 0.279
+  02:57:42 loadavg 57.01 host busy 0.275
+2026-11-18T02:57:42Z PASS1_compress START
+2026-11-18T06:37:03Z PASS1_compress END exit 0 wall_s 13161
+2026-11-18T06:37:03Z PASS2_verify START
+2026-11-18T10:26:54Z note: driver script killed by hand about 10:26 UTC (plan change: no pass 3); the running verification pass continues
+2026-11-18T10:50:49Z PASS2_verify END exit 0 wall_s 15226 (end taken from p2_verify.log; driver was killed before)
+2026-11-18T10:53:28Z summary: out/k16: 16 of 16 splits; kept 88,132,116.4 bytes over 501,062,281 stream bytes; compress: longest split 3.655 h, 99.26 core-hours, peak memory per split up to 10.52 GiB   decodes: 16 of 16 PASS (verify), longest 4.229 h 

@@ -1,0 +1,42 @@
+weight bytes per row: unpacked 5.88 MB, run_packed 3.07 MB, packed 8-row 3.07 MB; 128 calls per row
+all kernels agree with A on the checked sites
+
+== 0 MB of other memory touched before every row ==
+kernel                         median us   mean us     to A | time-stamp ticks per row by site class (mean)
+A  entry (AVX2, unpacked)          614.3     569.4    1.000 | mlp.up (16) 720615 q/k/v (48) 365860 gates (48) 146945 out proj (16) 132573
+A0 entry, no prefetch              535.8     516.4    0.872 | mlp.up (16) 649302 q/k/v (48) 330832 gates (48) 135984 out proj (16) 122471
+A12 entry, prefetch 12 KB          523.5     484.6    0.852 | mlp.up (16) 612058 q/k/v (48) 310541 gates (48) 125688 out proj (16) 113612
+B  run_packed (AVX2, 4 rows)       447.0     648.0    0.728 | mlp.up (16) 793632 q/k/v (48) 415863 gates (48) 183596 out proj (16) 160378
+E  AVX2, packed 8 rows             361.7     411.1    0.589 | mlp.up (16) 514456 q/k/v (48) 267703 gates (48) 103407 out proj (16) 100060
+C5 AVX512-VNNI, unpacked           524.8     494.5    0.854 | mlp.up (16) 619157 q/k/v (48) 314984 gates (48) 136421 out proj (16) 114741
+D5 AVX512-VNNI, packed             554.6     556.3    0.903 | mlp.up (16) 692036 q/k/v (48) 358828 gates (48) 148606 out proj (16) 134795
+
+== 2 MB of other memory touched before every row ==
+kernel                         median us   mean us     to A | time-stamp ticks per row by site class (mean)
+A  entry (AVX2, unpacked)          831.9     840.0    1.000 | mlp.up (16) 1071295 q/k/v (48) 528038 gates (48) 219937 out proj (16) 196578
+A0 entry, no prefetch              672.4     699.1    0.808 | mlp.up (16) 885408 q/k/v (48) 440452 gates (48) 185502 out proj (16) 166398
+A12 entry, prefetch 12 KB          704.1     714.2    0.846 | mlp.up (16) 906814 q/k/v (48) 455153 gates (48) 186055 out proj (16) 166071
+B  run_packed (AVX2, 4 rows)       424.6     661.0    0.510 | mlp.up (16) 818760 q/k/v (48) 423896 gates (48) 181712 out proj (16) 161636
+E  AVX2, packed 8 rows             396.3     588.8    0.476 | mlp.up (16) 735615 q/k/v (48) 383345 gates (48) 147944 out proj (16) 145776
+C5 AVX512-VNNI, unpacked           676.3     698.5    0.813 | mlp.up (16) 876188 q/k/v (48) 441297 gates (48) 196822 out proj (16) 161974
+D5 AVX512-VNNI, packed             625.7     719.6    0.752 | mlp.up (16) 900041 q/k/v (48) 462871 gates (48) 189072 out proj (16) 174737
+
+== 4 MB of other memory touched before every row ==
+kernel                         median us   mean us     to A | time-stamp ticks per row by site class (mean)
+A  entry (AVX2, unpacked)          927.3     974.2    1.000 | mlp.up (16) 1235817 q/k/v (48) 615311 gates (48) 259588 out proj (16) 226904
+A0 entry, no prefetch              664.6     748.3    0.717 | mlp.up (16) 945365 q/k/v (48) 473844 gates (48) 201111 out proj (16) 175348
+A12 entry, prefetch 12 KB          793.7     843.6    0.856 | mlp.up (16) 1069350 q/k/v (48) 537776 gates (48) 220118 out proj (16) 197056
+B  run_packed (AVX2, 4 rows)       420.0     605.5    0.453 | mlp.up (16) 742660 q/k/v (48) 393933 gates (48) 167679 out proj (16) 148892
+E  AVX2, packed 8 rows             399.4     559.1    0.431 | mlp.up (16) 697341 q/k/v (48) 366574 gates (48) 141746 out proj (16) 135526
+C5 AVX512-VNNI, unpacked           753.7     824.1    0.813 | mlp.up (16) 1031911 q/k/v (48) 520502 gates (48) 234254 out proj (16) 190578
+D5 AVX512-VNNI, packed             635.1     740.8    0.685 | mlp.up (16) 919870 q/k/v (48) 479228 gates (48) 197027 out proj (16) 181481
+
+== 8 MB of other memory touched before every row ==
+kernel                         median us   mean us     to A | time-stamp ticks per row by site class (mean)
+A  entry (AVX2, unpacked)         1007.9    1264.5    1.000 | mlp.up (16) 1589325 q/k/v (48) 815052 gates (48) 336447 out proj (16) 293851
+A0 entry, no prefetch              695.1    1039.2    0.690 | mlp.up (16) 1305753 q/k/v (48) 672155 gates (48) 271227 out proj (16) 244771
+A12 entry, prefetch 12 KB          927.2    1174.2    0.920 | mlp.up (16) 1481763 q/k/v (48) 748126 gates (48) 311332 out proj (16) 276722
+B  run_packed (AVX2, 4 rows)       424.8     639.9    0.421 | mlp.up (16) 786701 q/k/v (48) 411559 gates (48) 178829 out proj (16) 158494
+E  AVX2, packed 8 rows             407.9     629.8    0.405 | mlp.up (16) 792789 q/k/v (48) 405074 gates (48) 160512 out proj (16) 152730
+C5 AVX512-VNNI, unpacked           900.0    1201.6    0.893 | mlp.up (16) 1499752 q/k/v (48) 773793 gates (48) 329609 out proj (16) 280288
+D5 AVX512-VNNI, packed             637.0     769.4    0.632 | mlp.up (16) 962032 q/k/v (48) 492345 gates (48) 202983 out proj (16) 188750

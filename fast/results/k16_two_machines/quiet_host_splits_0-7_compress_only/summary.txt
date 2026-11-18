@@ -1,0 +1,3 @@
+out/k16x2b: 8 of 16 splits; kept 46,875,855.0 bytes over 250,531,140 stream bytes; compress: longest split 1.941 h, 36.75 core-hours, peak memory per split up to 10.46 GiB
+  splits without a result: [8, 9, 10, 11, 12, 13, 14, 15]
+  decodes: none run

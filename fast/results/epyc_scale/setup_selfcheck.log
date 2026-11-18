@@ -1,0 +1,17 @@
+00:49:06 compiler: Ubuntu clang version 18.1.3 (1ubuntu1); clang-18=1:18.1.3-1ubuntu1 libc6=2.39-0ubuntu8.12 libstdc++-13-dev=13.3.0-6ubuntu2~24.04.1 lld-18=1:18.1.3-1ubuntu1 
+00:49:07 stream.bin: 501062281 bytes, sha256 ok
+00:49:22 tbN (orig): 66236cc0b68a1f6247cbdd7a682c2bce2a05ab11b15cb5e665e901034f6bde3e, PGO profile entries discarded: 18
+00:49:22    (built on the laptop: 66236cc0b68a1f62...; a different binary is not an error, the self-check decides)
+00:49:38 tbK (packed): 02579d85ebda3008edef96e743ce2fcec4526cd1708020d63651f5dc9a3377e3, PGO profile entries discarded: 18
+00:49:38    (built on the laptop: 02579d85ebda3008...; a different binary is not an error, the self-check decides)
+00:49:55 tbKM (packed+mt): 77d65f2e4e8b63bd3bea3eefedd8c94d0a6c68050bd8e3cca22a34a098fa8688, PGO profile entries discarded: 19
+00:49:55    (built on the laptop: 77d65f2e4e8b63bd...; a different binary is not an error, the self-check decides)
+00:52:10   q_tbN: sha 9e925d7846f34983 ok
+00:53:44   q_tbK: sha 9e925d7846f34983 ok
+00:55:15   q_tbKM: sha 9e925d7846f34983 ok
+00:56:40   q_tbK_p3: sha 9e925d7846f34983 ok
+00:58:08   q_tbK_v3: verification decode PASS
+01:00:04   q_tbKM_s2f: threaded decode test with 20 % forced wrong guesses PASS
+01:03:50   c60_tbK_p3: sha e3c7340dce4cef65 ok
+01:12:43   ref_tbK_p3: sha 727e97767d69fb56 ok
+01:12:43 SELF-CHECK PASSED

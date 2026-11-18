@@ -1,0 +1,114 @@
+{
+ "K": 16,
+ "splits_done": [
+  0,
+  1,
+  2,
+  3,
+  4,
+  5,
+  6,
+  7
+ ],
+ "splits_missing": [
+  8,
+  9,
+  10,
+  11,
+  12,
+  13,
+  14,
+  15
+ ],
+ "total_kept_bytes": 46875854.977,
+ "stream_bytes": 250531140,
+ "compress_max_split_hours": 1.9414166666666668,
+ "compress_cpu_hours": 36.747972222222224,
+ "pipe": 3,
+ "max_peak_gib": 10.463298797607422,
+ "decodes": [],
+ "decodes_all_pass": false,
+ "decode_max_split_hours": 0.0,
+ "splits": [
+  {
+   "k": 0,
+   "start": 0,
+   "end": 31316392,
+   "warm_from": 0,
+   "kept_bytes": 5177397.763,
+   "bits_per_byte": 1.3226,
+   "seconds": 5294.9,
+   "peak_gib": 10.463298797607422
+  },
+  {
+   "k": 1,
+   "start": 31316392,
+   "end": 62632785,
+   "warm_from": 27316614,
+   "kept_bytes": 5456562.913,
+   "bits_per_byte": 1.39392,
+   "seconds": 6989.1,
+   "peak_gib": 10.327887535095215
+  },
+  {
+   "k": 2,
+   "start": 62632785,
+   "end": 93949177,
+   "warm_from": 58635148,
+   "kept_bytes": 6118760.708,
+   "bits_per_byte": 1.56308,
+   "seconds": 6289.8,
+   "peak_gib": 10.341360092163086
+  },
+  {
+   "k": 3,
+   "start": 93949177,
+   "end": 125265570,
+   "warm_from": 89951588,
+   "kept_bytes": 5765819.715,
+   "bits_per_byte": 1.47292,
+   "seconds": 6290.2,
+   "peak_gib": 10.23951530456543
+  },
+  {
+   "k": 4,
+   "start": 125265570,
+   "end": 156581962,
+   "warm_from": 121267695,
+   "kept_bytes": 6141387.946,
+   "bits_per_byte": 1.56886,
+   "seconds": 6442.3,
+   "peak_gib": 10.317710876464844
+  },
+  {
+   "k": 5,
+   "start": 156581962,
+   "end": 187898355,
+   "warm_from": 152584174,
+   "kept_bytes": 5655862.304,
+   "bits_per_byte": 1.44483,
+   "seconds": 6350.7,
+   "peak_gib": 10.240327835083008
+  },
+  {
+   "k": 6,
+   "start": 187898355,
+   "end": 219214747,
+   "warm_from": 183899223,
+   "kept_bytes": 6134720.695,
+   "bits_per_byte": 1.56716,
+   "seconds": 6692.3,
+   "peak_gib": 10.324488639831543
+  },
+  {
+   "k": 7,
+   "start": 219214747,
+   "end": 250531140,
+   "warm_from": 215234022,
+   "kept_bytes": 6425342.933,
+   "bits_per_byte": 1.6414,
+   "seconds": 6484.3,
+   "peak_gib": 9.95341968536377
+  }
+ ]
+}

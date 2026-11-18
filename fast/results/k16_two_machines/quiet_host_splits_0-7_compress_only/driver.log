@@ -1,0 +1,6 @@
+2026-11-18T15:18:07Z hostB driver start; cpu sets: cpu sets: 8 x 4 on 16 cores / 32 logical CPUs: SMT siblings shared 7,103,79,175 28,124,49,145 52,148,53,149 8,104,81,177 85,181,59,155 60,156,61,157 21,117,92,188 67,163,69,165 
+2026-11-18T15:18:07Z hostB host: loadavg 49.70 47.23 48.47, cmix processes already running: 0
+2026-11-18T15:18:07Z hostB PASS1_compress START splits 0-7, 8 at once, 4 CPUs each
+2026-11-18T17:14:39Z hostB PASS1_compress END exit 0 wall_s 6992
+2026-11-18T17:14:39Z hostB summary (this machine's splits only): out/k16x2b: 8 of 16 splits; kept 46,875,855.0 bytes over 250,531,140 stream bytes; compress: longest split 1.941 h, 36.75 core-hours, peak memory per split up to 10.46 GiB   splits without a result: [8, 9, 10, 11, 12, 13, 14, 15]   decodes: none run 
+2026-11-18T17:14:39Z hostB ALL DONE

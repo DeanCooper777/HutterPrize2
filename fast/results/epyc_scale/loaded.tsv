@@ -1,0 +1,10 @@
+utc	config	runs	processes_per_run	cpu_sets	stream_bytes_per_s_total	model_s_min	model_s_max	peak_pss_kb_sum	all_ok
+2026-11-18T02:06:44Z	16:0	16	1	distinct physical cores	39103.2	56.2	66.3	131399084	yes
+2026-11-18T02:09:01Z	16:2	16	2	SMT siblings shared	47723.4	47.4	52.8	133999003	yes
+2026-11-18T02:10:56Z	8:3	8	3	SMT siblings shared	36746.6	31.4	33.7	68874702	yes
+2026-11-18T02:13:51Z	16:3	16	3	oversubscribed	65257.5	28.7	57.7	137940020	yes
+2026-11-18T02:15:32Z	5:3	5	3	distinct physical cores	36524.3	19.3	24.4	42855888	yes
+2026-11-18T02:18:06Z	16:3:2	16	2	SMT siblings shared	49957.0	43.7	51.9	138671636	yes
+2026-11-18T02:19:55Z	8:3:4	8	4	SMT siblings shared	41956.0	26.4	31.5	68767454	yes
+2026-11-18T02:21:49Z	10:3	10	3	SMT siblings shared	46780.2	30.4	34.0	85925858	yes
+2026-11-18T02:24:29Z	16:3:32	16	32	oversubscribed	81176.6	24.6	32.4	137548832	yes

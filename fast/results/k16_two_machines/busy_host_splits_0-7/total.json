@@ -1,0 +1,179 @@
+{
+ "K": 16,
+ "splits_done": [
+  0,
+  1,
+  2,
+  3,
+  4,
+  5,
+  6,
+  7
+ ],
+ "splits_missing": [
+  8,
+  9,
+  10,
+  11,
+  12,
+  13,
+  14,
+  15
+ ],
+ "total_kept_bytes": 46875854.977,
+ "stream_bytes": 250531140,
+ "compress_max_split_hours": 3.4002499999999998,
+ "compress_cpu_hours": 51.15508333333333,
+ "pipe": 3,
+ "max_peak_gib": 10.465704917907715,
+ "decodes": [
+  {
+   "k": 0,
+   "mode": "verify",
+   "passed": true,
+   "decoded_bytes": 31316392,
+   "seconds": 12343.8,
+   "peak_gib": 9.998865127563477
+  },
+  {
+   "k": 1,
+   "mode": "verify",
+   "passed": true,
+   "decoded_bytes": 35316171,
+   "seconds": 9102.8,
+   "peak_gib": 10.328180313110352
+  },
+  {
+   "k": 2,
+   "mode": "verify",
+   "passed": true,
+   "decoded_bytes": 35314029,
+   "seconds": 8898.0,
+   "peak_gib": 10.347272872924805
+  },
+  {
+   "k": 3,
+   "mode": "verify",
+   "passed": true,
+   "decoded_bytes": 35313982,
+   "seconds": 12003.3,
+   "peak_gib": 10.273747444152832
+  },
+  {
+   "k": 4,
+   "mode": "verify",
+   "passed": true,
+   "decoded_bytes": 35314267,
+   "seconds": 13392.8,
+   "peak_gib": 10.188722610473633
+  },
+  {
+   "k": 5,
+   "mode": "verify",
+   "passed": true,
+   "decoded_bytes": 35314181,
+   "seconds": 7941.7,
+   "peak_gib": 10.312071800231934
+  },
+  {
+   "k": 6,
+   "mode": "verify",
+   "passed": true,
+   "decoded_bytes": 35315524,
+   "seconds": 13259.2,
+   "peak_gib": 10.285506248474121
+  },
+  {
+   "k": 7,
+   "mode": "verify",
+   "passed": true,
+   "decoded_bytes": 35297118,
+   "seconds": 9053.3,
+   "peak_gib": 10.326872825622559
+  }
+ ],
+ "decodes_all_pass": true,
+ "decode_max_split_hours": 3.720222222222222,
+ "splits": [
+  {
+   "k": 0,
+   "start": 0,
+   "end": 31316392,
+   "warm_from": 0,
+   "kept_bytes": 5177397.763,
+   "bits_per_byte": 1.3226,
+   "seconds": 10115.0,
+   "peak_gib": 10.465704917907715
+  },
+  {
+   "k": 1,
+   "start": 31316392,
+   "end": 62632785,
+   "warm_from": 27316614,
+   "kept_bytes": 5456562.913,
+   "bits_per_byte": 1.39392,
+   "seconds": 7825.8,
+   "peak_gib": 10.330318450927734
+  },
+  {
+   "k": 2,
+   "start": 62632785,
+   "end": 93949177,
+   "warm_from": 58635148,
+   "kept_bytes": 6118760.708,
+   "bits_per_byte": 1.56308,
+   "seconds": 8018.3,
+   "peak_gib": 9.76006031036377
+  },
+  {
+   "k": 3,
+   "start": 93949177,
+   "end": 125265570,
+   "warm_from": 89951588,
+   "kept_bytes": 5765819.715,
+   "bits_per_byte": 1.47292,
+   "seconds": 10099.6,
+   "peak_gib": 10.188475608825684
+  },
+  {
+   "k": 4,
+   "start": 125265570,
+   "end": 156581962,
+   "warm_from": 121267695,
+   "kept_bytes": 6141387.946,
+   "bits_per_byte": 1.56886,
+   "seconds": 10406.1,
+   "peak_gib": 10.242979049682617
+  },
+  {
+   "k": 5,
+   "start": 156581962,
+   "end": 187898355,
+   "warm_from": 152584174,
+   "kept_bytes": 5655862.304,
+   "bits_per_byte": 1.44483,
+   "seconds": 7399.5,
+   "peak_gib": 10.363260269165039
+  },
+  {
+   "k": 6,
+   "start": 187898355,
+   "end": 219214747,
+   "warm_from": 183899223,
+   "kept_bytes": 6134720.695,
+   "bits_per_byte": 1.56716,
+   "seconds": 12240.9,
+   "peak_gib": 9.883913040161133
+  },
+  {
+   "k": 7,
+   "start": 219214747,
+   "end": 250531140,
+   "warm_from": 215234022,
+   "kept_bytes": 6425342.933,
+   "bits_per_byte": 1.6414,
+   "seconds": 8077.3,
+   "peak_gib": 9.786117553710938
+  }
+ ]
+}

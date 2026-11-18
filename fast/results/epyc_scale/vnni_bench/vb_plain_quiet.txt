@@ -1,0 +1,34 @@
+weight bytes per row: unpacked 5.88 MB, run_packed 3.07 MB, packed 8-row 3.07 MB; 128 calls per row
+all kernels agree with A on the checked sites
+
+== 0 MB of other memory touched before every row ==
+kernel                         median us   mean us     to A | time-stamp ticks per row by site class (mean)
+A  entry (AVX2, unpacked)          225.5     310.9    1.000 | mlp.up (16) 393550 q/k/v (48) 198094 gates (48) 81641 out proj (16) 72306
+A0 entry, no prefetch              205.7     279.6    0.912 | mlp.up (16) 353827 q/k/v (48) 177489 gates (48) 73210 out proj (16) 65881
+A12 entry, prefetch 12 KB          176.0     262.5    0.781 | mlp.up (16) 332954 q/k/v (48) 167506 gates (48) 67303 out proj (16) 61210
+B  run_packed (AVX2, 4 rows)       387.0     432.1    1.716 | mlp.up (16) 525377 q/k/v (48) 276440 gates (48) 126040 out proj (16) 108045
+E  AVX2, packed 8 rows             360.5     345.5    1.599 | mlp.up (16) 431110 q/k/v (48) 224674 gates (48) 88318 out proj (16) 83918
+
+== 2 MB of other memory touched before every row ==
+kernel                         median us   mean us     to A | time-stamp ticks per row by site class (mean)
+A  entry (AVX2, unpacked)          607.9     590.5    1.000 | mlp.up (16) 751001 q/k/v (48) 372137 gates (48) 152924 out proj (16) 140610
+A0 entry, no prefetch              558.9     560.4    0.919 | mlp.up (16) 710146 q/k/v (48) 351782 gates (48) 147982 out proj (16) 134727
+A12 entry, prefetch 12 KB          502.6     504.8    0.827 | mlp.up (16) 643619 q/k/v (48) 315577 gates (48) 131265 out proj (16) 120717
+B  run_packed (AVX2, 4 rows)       988.9     778.8    1.627 | mlp.up (16) 944654 q/k/v (48) 497076 gates (48) 230431 out proj (16) 196234
+E  AVX2, packed 8 rows             895.0     735.2    1.472 | mlp.up (16) 909927 q/k/v (48) 482318 gates (48) 190286 out proj (16) 181118
+
+== 4 MB of other memory touched before every row ==
+kernel                         median us   mean us     to A | time-stamp ticks per row by site class (mean)
+A  entry (AVX2, unpacked)          815.3     809.6    1.000 | mlp.up (16) 1030389 q/k/v (48) 509796 gates (48) 209999 out proj (16) 192884
+A0 entry, no prefetch              638.9     659.6    0.784 | mlp.up (16) 838984 q/k/v (48) 412338 gates (48) 172797 out proj (16) 158719
+A12 entry, prefetch 12 KB          695.2     699.2    0.853 | mlp.up (16) 891376 q/k/v (48) 441768 gates (48) 178539 out proj (16) 166330
+B  run_packed (AVX2, 4 rows)       420.5     609.9    0.516 | mlp.up (16) 734749 q/k/v (48) 401587 gates (48) 174351 out proj (16) 152791
+E  AVX2, packed 8 rows             388.3     577.8    0.476 | mlp.up (16) 714821 q/k/v (48) 382372 gates (48) 149656 out proj (16) 139183
+
+== 8 MB of other memory touched before every row ==
+kernel                         median us   mean us     to A | time-stamp ticks per row by site class (mean)
+A  entry (AVX2, unpacked)         1026.3    1244.3    1.000 | mlp.up (16) 1582270 q/k/v (48) 787258 gates (48) 325900 out proj (16) 290701
+A0 entry, no prefetch              715.5    1002.5    0.697 | mlp.up (16) 1264251 q/k/v (48) 637824 gates (48) 263283 out proj (16) 240496
+A12 entry, prefetch 12 KB          929.7    1133.8    0.906 | mlp.up (16) 1432431 q/k/v (48) 719032 gates (48) 300370 out proj (16) 269036
+B  run_packed (AVX2, 4 rows)       459.7     655.1    0.448 | mlp.up (16) 785428 q/k/v (48) 433498 gates (48) 187413 out proj (16) 165696
+E  AVX2, packed 8 rows             414.3     632.7    0.404 | mlp.up (16) 783639 q/k/v (48) 416215 gates (48) 163906 out proj (16) 154105

@@ -1,0 +1,47 @@
+2026-11-17 19:07:05 === step single
+2026-11-17 19:13:28 === step single
+e_p0 e stop 17000000 pipe 0 rc 0 out 3062257 B sha256 8288b14c7581c889c1b78a21a281a4f33e9ba773f0b0e5bf179e144cd48c3896 archive9 no stream IDENTICAL 501062281 | neif_e: 17000000 stream bytes -> 3062257 B, coder 2845.8 s wall, 2845.4 s cpu in all processes, processes 1, peak memory 10006 MiB (peak resident set) | command wall 50:37.97, max rss of the first process 10246748 kB
+neif_e: STOPPED behind stream byte 17000000 (NEIF_E_STOP): the output is a PREFIX run, not an archive
+2026-11-17 20:04:07 === step pipe3
+e_p3 e stop 17000000 pipe 3 rc 0 out 3062257 B sha256 8288b14c7581c889c1b78a21a281a4f33e9ba773f0b0e5bf179e144cd48c3896 archive9 no stream IDENTICAL 501062281 | neif_e: 17000000 stream bytes -> 3062257 B, coder 2001.8 s wall, 3649.1 s cpu in all processes, processes 3, peak memory 10208 MiB (largest sum of the processes' proportional set sizes) | command wall 36:37.16, max rss of the first process 8959288 kB
+neif_pipe: MULTI-PROCESS COMPRESSION (NEIF_PIPE=3, 3 processes; test build): a development
+neif_pipe: convenience, NOT the official single-core run.
+neif_pipe stage 1: 2001.1 s wall, 864.4 s cpu, 78769 queue waits
+neif_pipe stage 0: 2001.1 s wall, 954.5 s cpu, 3806 queue waits
+neif_pipe coder stage: 2001.8 s wall, 1830.2 s cpu, 1011793 queue waits
+neif_pipe: MULTI-PROCESS COMPRESSION ended in order (3 processes). NOT the official single-core run;
+neif_pipe: the output is meant to equal the one-process output of this build byte for byte.
+neif_e: STOPPED behind stream byte 17000000 (NEIF_E_STOP): the output is a PREFIX run, not an archive
+2026-11-17 20:40:44 single 3062257 B 8288b14c7581c889c1b78a21a281a4f33e9ba773f0b0e5bf179e144cd48c3896  -
+2026-11-17 20:40:44 pipe3  3062257 B 8288b14c7581c889c1b78a21a281a4f33e9ba773f0b0e5bf179e144cd48c3896  -
+2026-11-17 20:40:44 REAL PATH, NEIF_PIPE=3 against one process, stream bytes [0, 17000000): IDENTICAL
+2026-11-17 20:40:44 === step pipe2
+e_p2 e stop 3000000 pipe 2 rc 0 out 957468 B sha256 7a074b53076f72271962e813eb3a134d83abcf61b62f543a57552c1323133b26 archive9 no stream IDENTICAL 501062281 | neif_e: 3000000 stream bytes -> 957468 B, coder 246.7 s wall, 277.7 s cpu in all processes, processes 2, peak memory 8293 MiB (largest sum of the processes' proportional set sizes) | command wall 7:20.10, max rss of the first process 8275056 kB
+neif_pipe: MULTI-PROCESS COMPRESSION (NEIF_PIPE=2, 2 processes; test build): a development
+neif_pipe: convenience, NOT the official single-core run.
+neif_pipe stage 0: 245.8 s wall, 31.1 s cpu, 1392 queue waits
+neif_pipe coder stage: 246.7 s wall, 246.6 s cpu, 0 queue waits
+neif_pipe: MULTI-PROCESS COMPRESSION ended in order (2 processes). NOT the official single-core run;
+neif_pipe: the output is meant to equal the one-process output of this build byte for byte.
+neif_e: STOPPED behind stream byte 3000000 (NEIF_E_STOP): the output is a PREFIX run, not an archive
+2026-11-17 20:48:04 REAL PATH, NEIF_PIPE=2, stream bytes [0, 3000000): first 957460 output bytes IDENTICAL to the one-process run
+2026-11-17 20:48:04 === step official
+976bf2d309707ab555e0c92720da5508ff0e5e6b846fc7082234262b06767f82  ./comp9
+after 3823 s: out9 has 3145728 B
+off2_in.sh: line 17:  1092 Killed                  ( ./comp9 -e enwik9 out9 > log 2>&1 )
+
+3a692c225da4b5db5fd205394fc5e1debfb323df5a9d28dcc7a955efe1ede235  out9.prefix
+2026-11-17 21:51:49 OFFICIAL comp9 output (3145728 B) against the test build's one-process -e output (3062257 B): first 3062249 bytes IDENTICAL
+2026-11-17 21:51:49 === step sv
+2026-11-17 21:51:49 official prefix 3145728 B; validation decode of stream bytes [0, 16500000)
+o3_sv3 u mt 0 cpus 2 rc 0 start 0 end 16500000 warm_from 0 decoded 16500000 wrong 0 first_wrong -1 model_s 1841.9 bytes_per_s 8957.9 pipe 3 cpu_s 3246.0 pss_mb 10742 rss_mb 8704
+neif_sv: PASS: stream bytes [0, 16500000) decoded and equal to the expected stream
+2026-11-17 22:22:33 sv rc 0
+neif_sv progress: stream bytes [0, 12869546) equal so far, 10720 bytes/s, peak 10010 MiB in all stages
+neif_sv progress: stream bytes [0, 14710411) equal so far, 9804 bytes/s, peak 10187 MiB in all stages
+neif_sv progress: stream bytes [0, 16292069) equal so far, 9047 bytes/s, peak 10205 MiB in all stages
+neif_sv: PASS: stream bytes [0, 16500000) decoded and equal to the expected stream
+2026-11-17 22:22:33 === step quick
+eq_t0 t mt 0 cpus 2 rc 0 start 60000000 end 60030000 warm_from 59993698 total_bits 55594.661 model_s 15.0 bytes_per_s 2412.3 sha 9e925d7846f34983
+eq_tp3 t mt 0 cpus 2 rc 0 start 60000000 end 60030000 warm_from 59993698 total_bits 55594.661 model_s 8.7 bytes_per_s 4152.3 sha 9e925d7846f34983
+2026-11-17 22:24:39 e batch done

@@ -1,0 +1,139 @@
+f_r16N t mt 0 cpus 2 rc 0 start 250000000 end 250300000 warm_from 248804598 total_bits 2505874.827 model_s 302.1 bytes_per_s 4950.2 sha 8403823697ef24d5
+f_r16K t mt 0 cpus 2 rc 0 start 250000000 end 250300000 warm_from 248804598 total_bits 2505874.827 model_s 234.3 bytes_per_s 6383.8 sha 8403823697ef24d5
+f_rtK t mt 0 cpus 2 rc 0 start 250000000 end 250300000 warm_from 248804598 total_bits 2508178.191 model_s 226.9 bytes_per_s 6591.8 sha 727e97767d69fb56
+f_ruK u mt 0 cpus 2 rc 0 start 250000000 end 250300000 warm_from 248804598 decoded 1495402 wrong 0 first_wrong -1 model_s 528.7 bytes_per_s 2828.5 pipe 0 cpu_s 528.6 pss_mb 0 rss_mb 8682
+f_rsvK u mt 0 cpus 2 rc 0 start 250000000 end 250300000 warm_from 248804598 decoded 1495402 wrong 0 first_wrong -1 model_s 224.6 bytes_per_s 6658.2 pipe 3 cpu_s 627.6 pss_mb 9203 rss_mb 8714
+neif_sv: PASS: stream bytes [248804598, 250300000) decoded and equal to the expected stream
+q_t0 t mt 0 cpus 2 rc 0 start 60000000 end 60030000 warm_from 59993698 total_bits 55594.661 model_s 16.3 bytes_per_s 2231.0 sha 9e925d7846f34983
+q_u0 u mt 0 cpus 2 rc 0 start 60000000 end 60030000 warm_from 59993698 decoded 36302 wrong 0 first_wrong -1 model_s 16.3 bytes_per_s 2230.1 pipe 0 cpu_s 16.3 pss_mb 0 rss_mb 6889
+q_t2 t mt 2 cpus 0,1,2,3 rc 0 start 60000000 end 60030000 warm_from 59993698 total_bits 55594.661 model_s 17.1 bytes_per_s 2118.4 sha 9e925d7846f34983
+neif_mt: 2 threads for the step, cpus 0 1
+neif_mt: 2 threads, 849172 regions on the pool
+q_u2 u mt 2 cpus 0,1,2,3 rc 0 start 60000000 end 60030000 warm_from 59993698 decoded 36302 wrong 0 first_wrong -1 model_s 17.2 bytes_per_s 2113.5 pipe 0 cpu_s 33.7 pss_mb 0 rss_mb 6890
+neif_mt: 2 threads for the step, cpus 0 1
+neif_mt: 2 threads, 849172 regions on the pool
+q_t3 t mt 3 cpus 0,1,2,3 rc 0 start 60000000 end 60030000 warm_from 59993698 total_bits 55594.661 model_s 17.9 bytes_per_s 2031.3 sha 9e925d7846f34983
+neif_mt: 3 threads for the step, cpus 0 1 2
+neif_mt: 3 threads, 849172 regions on the pool
+q_u3 u mt 3 cpus 0,1,2,3 rc 0 start 60000000 end 60030000 warm_from 59993698 decoded 36302 wrong 0 first_wrong -1 model_s 17.7 bytes_per_s 2047.0 pipe 0 cpu_s 51.8 pss_mb 0 rss_mb 6889
+neif_mt: 3 threads for the step, cpus 0 1 2
+neif_mt: 3 threads, 849172 regions on the pool
+s4_t0 t mt 0 cpus 2 rc 0 start 60000000 end 60030000 warm_from 59993698 total_bits 55594.661 model_s 16.0 bytes_per_s 2270.3 sha 9e925d7846f34983
+s4_t1 t mt 1 cpus 2,3 rc 0 start 60000000 end 60030000 warm_from 59993698 total_bits 55594.661 model_s 12.4 bytes_per_s 2916.8 sha 9e925d7846f34983
+neif_mt: 1 threads for the step, on a thread of their own, cpus 2 3
+neif_mt spec: launched 36302, not possible 0, PPMd kept 36302, undone 0; network rows run 36302, taken 36255, not taken 26
+neif_mt spec: 0 guesses made wrong on purpose
+neif_mt: 1 threads for the step, on a thread of their own, cpus 2 3
+neif_mt spec: launched 36302, not possible 0, PPMd kept 36302, undone 0; network rows run 36302, taken 36255, not taken 26
+neif_mt spec: 0 guesses made wrong on purpose
+s4_t1f t mt 1 cpus 2,3 rc 0 start 60000000 end 60030000 warm_from 59993698 total_bits 55594.661 model_s 13.9 bytes_per_s 2606.7 sha 9e925d7846f34983
+neif_mt: 1 threads for the step, on a thread of their own, cpus 2 3
+neif_mt spec: launched 36302, not possible 0, PPMd kept 29107, undone 7195; network rows run 36302, taken 29068, not taken 3561
+neif_mt spec: 7195 guesses made wrong on purpose
+neif_mt: 1 threads for the step, on a thread of their own, cpus 2 3
+neif_mt spec: launched 36302, not possible 0, PPMd kept 29107, undone 7195; network rows run 36302, taken 29068, not taken 3561
+neif_mt spec: 7195 guesses made wrong on purpose
+s4_t2 t mt 2 cpus 1,2,3 rc 0 start 60000000 end 60030000 warm_from 59993698 total_bits 55594.661 model_s 13.0 bytes_per_s 2799.0 sha 9e925d7846f34983
+neif_mt: 2 threads, 850101 regions on the pool
+neif_mt spec: launched 36302, not possible 0, PPMd kept 36302, undone 0; network rows run 36302, taken 36255, not taken 29
+neif_mt spec: 0 guesses made wrong on purpose
+neif_mt: 2 threads for the step, on a thread of their own, cpus 1 2 3
+neif_mt: 2 threads, 850101 regions on the pool
+neif_mt spec: launched 36302, not possible 0, PPMd kept 36302, undone 0; network rows run 36302, taken 36255, not taken 29
+neif_mt spec: 0 guesses made wrong on purpose
+s4_u1 u mt 1 cpus 2,3 rc 0 start 60000000 end 60030000 warm_from 59993698 decoded 36302 wrong 0 first_wrong -1 model_s 12.5 bytes_per_s 2909.2 pipe 0 cpu_s 24.3 pss_mb 0 rss_mb 6890
+neif_mt: 1 threads for the step, on a thread of their own, cpus 2 3
+neif_mt spec: launched 36302, not possible 0, PPMd kept 36302, undone 0; network rows run 36302, taken 36255, not taken 26
+neif_mt spec: 0 guesses made wrong on purpose
+neif_mt: 1 threads for the step, on a thread of their own, cpus 2 3
+neif_mt spec: launched 36302, not possible 0, PPMd kept 36302, undone 0; network rows run 36302, taken 36255, not taken 26
+neif_mt spec: 0 guesses made wrong on purpose
+s4_u1f u mt 1 cpus 2,3 rc 0 start 60000000 end 60030000 warm_from 59993698 decoded 36302 wrong 0 first_wrong -1 model_s 15.1 bytes_per_s 2402.5 pipe 0 cpu_s 29.5 pss_mb 0 rss_mb 6890
+neif_mt: 1 threads for the step, on a thread of their own, cpus 2 3
+neif_mt spec: launched 36302, not possible 0, PPMd kept 29107, undone 7195; network rows run 36302, taken 29068, not taken 3520
+neif_mt spec: 7195 guesses made wrong on purpose
+neif_mt: 1 threads for the step, on a thread of their own, cpus 2 3
+neif_mt spec: launched 36302, not possible 0, PPMd kept 29107, undone 7195; network rows run 36302, taken 29068, not taken 3520
+neif_mt spec: 7195 guesses made wrong on purpose
+f_rts2f t mt 2 cpus 1,2,3 rc 0 start 250000000 end 250300000 warm_from 248804598 total_bits 2508178.191 model_s 411.6 bytes_per_s 3632.7 sha 727e97767d69fb56
+neif_mt: 2 threads, 37396130 regions on the pool
+neif_mt spec: launched 1495402, not possible 0, PPMd kept 1345637, undone 149765; network rows run 1495402, taken 1343918, not taken 15891
+neif_mt spec: 149765 guesses made wrong on purpose
+f_rus2f u mt 2 cpus 1,2,3 rc 0 start 250000000 end 250300000 warm_from 248804598 decoded 1495402 wrong 0 first_wrong -1 model_s 419.7 bytes_per_s 3563.4 pipe 0 cpu_s 1257.5 pss_mb 0 rss_mb 8684
+neif_mt: 2 threads, 37385704 regions on the pool
+neif_mt spec: launched 1495402, not possible 0, PPMd kept 1345637, undone 149765; network rows run 1495402, taken 1343918, not taken 16069
+neif_mt spec: 149765 guesses made wrong on purpose
+f_rus2 u mt 2 cpus 1,2,3 rc 0 start 250000000 end 250300000 warm_from 248804598 decoded 1495402 wrong 0 first_wrong -1 model_s 419.3 bytes_per_s 3566.1 pipe 0 cpu_s 1256.6 pss_mb 0 rss_mb 8683
+neif_mt: 2 threads, 35267501 regions on the pool
+neif_mt spec: launched 1495402, not possible 0, PPMd kept 1495402, undone 0; network rows run 1495402, taken 1493483, not taken 461
+neif_mt spec: 0 guesses made wrong on purpose
+f_n0a t mt 0 cpus 2 rc 0 start 60000000 end 60500000 warm_from 59901431 total_bits 649395.559 model_s 258.8 bytes_per_s 2313.1 sha e3c7340dce4cef65
+f_k0a t mt 0 cpus 2 rc 0 start 60000000 end 60500000 warm_from 59901431 total_bits 649395.559 model_s 197.3 bytes_per_s 3033.9 sha e3c7340dce4cef65
+f_ku0a u mt 0 cpus 2 rc 0 start 60000000 end 60500000 warm_from 59901431 decoded 598569 wrong 0 first_wrong -1 model_s 197.6 bytes_per_s 3028.9 pipe 0 cpu_s 197.6 pss_mb 0 rss_mb 8514
+f_kus1a u mt 1 cpus 2,3 rc 0 start 60000000 end 60500000 warm_from 59901431 decoded 598569 wrong 0 first_wrong -1 model_s 159.1 bytes_per_s 3762.9 pipe 0 cpu_s 317.4 pss_mb 0 rss_mb 8515
+neif_mt: 1 threads for the step, on a thread of their own, cpus 2 3
+neif_mt spec: launched 598569, not possible 0, PPMd kept 598569, undone 0; network rows run 598569, taken 597970, not taken 194
+neif_mt spec: 0 guesses made wrong on purpose
+f_kus2a u mt 2 cpus 1,2,3 rc 0 start 60000000 end 60500000 warm_from 59901431 decoded 598569 wrong 0 first_wrong -1 model_s 154.0 bytes_per_s 3887.8 pipe 0 cpu_s 460.5 pss_mb 0 rss_mb 8515
+neif_mt: 2 threads, 13868196 regions on the pool
+neif_mt spec: launched 598569, not possible 0, PPMd kept 598569, undone 0; network rows run 598569, taken 597970, not taken 241
+neif_mt spec: 0 guesses made wrong on purpose
+f_kus1fa u mt 1 cpus 2,3 rc 0 start 60000000 end 60500000 warm_from 59901431 decoded 598569 wrong 0 first_wrong -1 model_s 174.0 bytes_per_s 3440.0 pipe 0 cpu_s 347.3 pss_mb 0 rss_mb 8515
+neif_mt: 1 threads for the step, on a thread of their own, cpus 2 3
+neif_mt spec: launched 598569, not possible 0, PPMd kept 460674, undone 137895; network rows run 598569, taken 460214, not taken 13569
+neif_mt spec: 137895 guesses made wrong on purpose
+f_kus2fa u mt 2 cpus 1,2,3 rc 0 start 60000000 end 60500000 warm_from 59901431 decoded 598569 wrong 0 first_wrong -1 model_s 181.4 bytes_per_s 3299.7 pipe 0 cpu_s 542.8 pss_mb 0 rss_mb 8515
+neif_mt: 2 threads, 15648101 regions on the pool
+neif_mt spec: launched 598569, not possible 0, PPMd kept 460674, undone 137895; network rows run 598569, taken 460214, not taken 15978
+neif_mt spec: 137895 guesses made wrong on purpose
+f_n0b t mt 0 cpus 2 rc 0 start 60000000 end 60500000 warm_from 59901431 total_bits 649395.559 model_s 259.1 bytes_per_s 2310.0 sha e3c7340dce4cef65
+f_k0b t mt 0 cpus 2 rc 0 start 60000000 end 60500000 warm_from 59901431 total_bits 649395.559 model_s 207.5 bytes_per_s 2885.3 sha e3c7340dce4cef65
+f_ku0b u mt 0 cpus 2 rc 0 start 60000000 end 60500000 warm_from 59901431 decoded 598569 wrong 0 first_wrong -1 model_s 202.6 bytes_per_s 2954.5 pipe 0 cpu_s 202.6 pss_mb 0 rss_mb 8514
+f_kus1b u mt 1 cpus 2,3 rc 0 start 60000000 end 60500000 warm_from 59901431 decoded 598569 wrong 0 first_wrong -1 model_s 157.6 bytes_per_s 3797.4 pipe 0 cpu_s 314.5 pss_mb 0 rss_mb 8515
+neif_mt: 1 threads for the step, on a thread of their own, cpus 2 3
+neif_mt spec: launched 598569, not possible 0, PPMd kept 598569, undone 0; network rows run 598569, taken 597970, not taken 182
+neif_mt spec: 0 guesses made wrong on purpose
+f_kus2b u mt 2 cpus 1,2,3 rc 0 start 60000000 end 60500000 warm_from 59901431 decoded 598569 wrong 0 first_wrong -1 model_s 180.2 bytes_per_s 3322.2 pipe 0 cpu_s 539.1 pss_mb 0 rss_mb 8515
+neif_mt: 2 threads, 13867906 regions on the pool
+neif_mt spec: launched 598569, not possible 0, PPMd kept 598569, undone 0; network rows run 598569, taken 597970, not taken 223
+neif_mt spec: 0 guesses made wrong on purpose
+f_kus1fb u mt 1 cpus 2,3 rc 0 start 60000000 end 60500000 warm_from 59901431 decoded 598569 wrong 0 first_wrong -1 model_s 174.9 bytes_per_s 3422.6 pipe 0 cpu_s 349.1 pss_mb 0 rss_mb 8515
+neif_mt: 1 threads for the step, on a thread of their own, cpus 2 3
+neif_mt spec: launched 598569, not possible 0, PPMd kept 460674, undone 137895; network rows run 598569, taken 460214, not taken 13055
+neif_mt spec: 137895 guesses made wrong on purpose
+f_kus2fb u mt 2 cpus 1,2,3 rc 0 start 60000000 end 60500000 warm_from 59901431 decoded 598569 wrong 0 first_wrong -1 model_s 181.6 bytes_per_s 3295.9 pipe 0 cpu_s 543.4 pss_mb 0 rss_mb 8515
+neif_mt: 2 threads, 15659379 regions on the pool
+neif_mt spec: launched 598569, not possible 0, PPMd kept 460674, undone 137895; network rows run 598569, taken 460214, not taken 16408
+neif_mt spec: 137895 guesses made wrong on purpose
+f_kp8 t mt 0 cpus 2 rc 0 start 60000000 end 60500000 warm_from 59901431 total_bits 649395.559 model_s 97.3 bytes_per_s 6152.5 sha e3c7340dce4cef65
+neif_pipe stage 0: 96.5 s wall, 82.3 s cpu, 119 queue waits
+neif_pipe stage 1: 96.6 s wall, 89.5 s cpu, 43 queue waits
+neif_pipe coder stage: 97.3 s wall, 94.7 s cpu, 30291 queue waits
+f_kp6 t mt 0 cpus 2 rc 0 start 60000000 end 60500000 warm_from 59901431 total_bits 649395.559 model_s 104.6 bytes_per_s 5724.0 sha e3c7340dce4cef65
+neif_pipe stage 0: 103.7 s wall, 55.4 s cpu, 604 queue waits
+neif_pipe stage 1: 103.9 s wall, 101.4 s cpu, 5 queue waits
+neif_pipe coder stage: 104.6 s wall, 89.3 s cpu, 184668 queue waits
+f_kp10 t mt 0 cpus 2 rc 0 start 60000000 end 60500000 warm_from 59901431 total_bits 649395.559 model_s 100.2 bytes_per_s 5976.6 sha e3c7340dce4cef65
+neif_pipe stage 0: 99.4 s wall, 94.7 s cpu, 9 queue waits
+neif_pipe stage 1: 99.4 s wall, 78.6 s cpu, 199582 queue waits
+neif_pipe coder stage: 100.2 s wall, 92.4 s cpu, 68994 queue waits
+f_kp4 t mt 0 cpus 2 rc 0 start 60000000 end 60500000 warm_from 59901431 total_bits 649395.559 model_s 121.4 bytes_per_s 4930.1 sha e3c7340dce4cef65
+neif_pipe stage 0: 120.6 s wall, 46.1 s cpu, 818 queue waits
+neif_pipe stage 1: 120.7 s wall, 118.5 s cpu, 4 queue waits
+neif_pipe coder stage: 121.4 s wall, 98.8 s cpu, 226545 queue waits
+f_kp8b t mt 0 cpus 2 rc 0 start 60000000 end 60500000 warm_from 59901431 total_bits 649395.559 model_s 87.6 bytes_per_s 6834.2 sha e3c7340dce4cef65
+neif_pipe stage 0: 86.8 s wall, 75.0 s cpu, 110 queue waits
+neif_pipe stage 1: 86.9 s wall, 80.9 s cpu, 462 queue waits
+neif_pipe coder stage: 87.6 s wall, 84.9 s cpu, 33891 queue waits
+f_ksv8 u mt 0 cpus 2 rc 0 start 60000000 end 60500000 warm_from 59901431 decoded 598569 wrong 0 first_wrong -1 model_s 91.3 bytes_per_s 6553.6 pipe 3 cpu_s 252.4 pss_mb 8893 rss_mb 8545
+neif_sv: PASS: stream bytes [59901431, 60500000) decoded and equal to the expected stream
+f_ksv6 u mt 0 cpus 2 rc 0 start 60000000 end 60500000 warm_from 59901431 decoded 598569 wrong 0 first_wrong -1 model_s 106.3 bytes_per_s 5630.6 pipe 3 cpu_s 249.7 pss_mb 8893 rss_mb 8545
+neif_sv: PASS: stream bytes [59901431, 60500000) decoded and equal to the expected stream
+f_k16offa t mt 0 cpus 2 rc 0 start 60000000 end 60500000 warm_from 59901431 total_bits 649395.559 model_s 202.6 bytes_per_s 2954.4 sha e3c7340dce4cef65
+f_k16ona t mt 0 cpus 2 rc 0 start 60000000 end 60500000 warm_from 59901431 total_bits 648989.078 model_s 219.4 bytes_per_s 2728.7 sha c3b318011766fae6
+f_k16offb t mt 0 cpus 2 rc 0 start 60000000 end 60500000 warm_from 59901431 total_bits 649395.559 model_s 204.6 bytes_per_s 2925.9 sha e3c7340dce4cef65
+f_k16onb t mt 0 cpus 2 rc 0 start 60000000 end 60500000 warm_from 59901431 total_bits 648989.078 model_s 208.5 bytes_per_s 2870.3 sha c3b318011766fae6
+f_k16offc t mt 0 cpus 2 rc 0 start 60000000 end 60500000 warm_from 59901431 total_bits 649395.559 model_s 198.4 bytes_per_s 3017.3 sha e3c7340dce4cef65
+f_rtN1 t mt 0 cpus 2 rc 0 start 250000000 end 250300000 warm_from 248804598 total_bits 2508178.191 model_s 681.0 bytes_per_s 2195.9 sha 727e97767d69fb56
+f_rtK1 t mt 0 cpus 2 rc 0 start 250000000 end 250300000 warm_from 248804598 total_bits 2508178.191 model_s 525.8 bytes_per_s 2843.9 sha 727e97767d69fb56
+fast batch done

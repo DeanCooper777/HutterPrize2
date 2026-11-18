@@ -1,0 +1,2 @@
+out/k16: 16 of 16 splits; kept 88,132,116.4 bytes over 501,062,281 stream bytes; compress: longest split 3.655 h, 99.26 core-hours, peak memory per split up to 10.52 GiB
+  decodes: 16 of 16 PASS (verify), longest 4.229 h
